@@ -18,6 +18,6 @@
 ## Validação e revisão
 
 - Execute `./scripts/validar.sh` para validar sintaxe, o workflow Wan e os arquivos Compose. Confira a saída do script para saber se a suíte de testes foi executada na imagem.
-- Para rodar a suíte no host, use um ambiente virtual com `studio/requirements.txt` e `httpx` para o `TestClient`, além de Cairo e `pptxgenjs@4.0.0` acessível ao Node. Execute `python3 -m unittest discover -s tests -v` e defina `NODE_PATH` se instalou o pacote Node fora da árvore de resolução padrão.
+- Para rodar a suíte no host, use um ambiente virtual com `studio/requirements.txt` e `studio/requirements-test.txt` para o `TestClient`, além de Cairo e `pptxgenjs@4.0.0` acessível ao Node. Execute `python3 -m unittest discover -s tests -v` e defina `NODE_PATH` se instalou o pacote Node fora da árvore de resolução padrão.
 - Use fixtures geradas em diretórios temporários. A suíte principal deve rodar sem modelos de voz, GPU, downloads de modelos ou serviços de IA. Registre separadamente provas de exportação audiovisual, Compose no Debian Sid e medições na GTX 1650.
 - Trabalhe em uma branch `dev/*` e abra um PR com o escopo, os resultados da validação e qualquer alteração nos contratos de API ou persistência. Consulte [Arquitetura da v1.3](docs/ARQUITETURA.md) e [Plano da v1.4](docs/PLANO_V1.4.md).

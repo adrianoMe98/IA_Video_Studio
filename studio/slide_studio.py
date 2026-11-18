@@ -1,4 +1,4 @@
-"""Slide Studio v1.3 — layout declarativo, SVG preview, PDF, PNG e PPTX.
+"""Slide Studio — layout declarativo, SVG preview, PDF, PNG e PPTX.
 
 Sem URLs externas, HTML de usuário ou comandos shell. Elementos são textos,
 formas e imagens PNG de uma biblioteca local validada.
@@ -8,12 +8,16 @@ from __future__ import annotations
 import base64
 import io
 import json
+import math
 import re
 import subprocess
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
 from PIL import Image, ImageFont, ImageOps
+
+from diagrams import Diagram, diagram_columns
+from media import MAX_PNG, asset_path
 
 W, H = 1280, 720
 LAYOUTS = {
@@ -95,10 +99,8 @@ def _text(items, value, x, y, w, size=26, color='#FFFFFF', bold=False,
 
 
 def _image(items, asset: str, project_dir: Path, x, y, w, h):
-    if not re.fullmatch(r'[0-9a-f]{24}\.png', asset or ''):
-        return False
-    source = project_dir / 'assets' / asset
-    if source.is_symlink() or not source.is_file() or source.stat().st_size > 8*1024*1024:
+    source = asset_path(project_dir, asset)
+    if source is None or source.stat().st_size > MAX_PNG:
         return False
     # Encaixar sem distorção no mesmo canvas nos três formatos (SVG/PDF/PPTX).
     with Image.open(source) as original:
@@ -156,18 +158,62 @@ def suggest_layout(title: str, bullets: list[str], index: int, total: int) -> st
     return 'concept_explainer'
 
 
+def _technical_diagram(items, diagram: Diagram, palette):
+    columns = diagram_columns(diagram.nodes, diagram.edges)
+    spacing = 1100 / len(columns)
+    width = min(180, spacing - 86)
+    height = 82
+    positions = {}
+    for i, column in enumerate(columns):
+        x = 90 + (i + .5) * spacing - width / 2
+        row = 408 / len(column)
+        for j, node in enumerate(column):
+            positions[node.id] = (x, 218 + (j + .5) * row - height / 2)
+    for edge in diagram.edges:
+        x1, y1 = positions[edge.source]
+        x2, y2 = positions[edge.target]
+        x1 += width
+        y1 += height / 2
+        y2 += height / 2
+        angle = math.atan2(y2 - y1, x2 - x1)
+        _line(items, x1, y1, x2, y2, palette['accent'], 3)
+        for offset in (-.48, .48):
+            _line(items, x2 - 13 * math.cos(angle + offset),
+                  y2 - 13 * math.sin(angle + offset), x2, y2, palette['accent'], 3)
+    for node in diagram.nodes:
+        x, y = positions[node.id]
+        _rect(items, x, y, width, height, palette['panel'], 10, palette['outline'], 2)
+        _text(items, node.label, x + 8, y + (24 if node.group else 15), width - 16,
+              19, palette['fg'], True, 2, 'center')
+        if node.group:
+            _text(items, node.group, x + 8, y + 4, width - 16,
+                  13, palette['accent'], False, 1, 'center')
+    for edge in diagram.edges:
+        if edge.label:
+            x1, y1 = positions[edge.source]
+            x2, y2 = positions[edge.target]
+            x = (x1 + width + x2) / 2
+            y = (y1 + y2 + height) / 2
+            size = min(144, max(45, x2 - x1 - width - 8))
+            _rect(items, x - size / 2, y - 20, size, 18, palette['bg'], 4)
+            _text(items, edge.label, x - size / 2, y - 20, size,
+                  13, palette['fg'], False, 1, 'center')
+
+
 def build_slide(project: dict, scene: dict, index: int, project_dir: Path) -> dict:
     theme = project.get('slide_theme', 'tech_blue')
     p = THEMES.get(theme, THEMES['tech_blue'])
     layout = scene.get('layout')
     if layout not in LAYOUTS:
         layout = suggest_layout(scene.get('title',''), scene.get('bullets',[]), index, len(project.get('scenes', [])))
+    if scene.get('diagram'):
+        layout = 'diagram_slide'
     title = scene.get('title', '')
     bullets = [str(x) for x in scene.get('bullets', []) if str(x).strip()][:8]
     desc = str(scene.get('narration', ''))
     item = []
     asset = scene.get('image', '')
-    image_ok = bool(asset and re.fullmatch(r'[0-9a-f]{24}\.png', asset) and (project_dir/'assets'/asset).is_file())
+    image_ok = asset_path(project_dir, asset) is not None
 
     if layout == 'hero_cover':
         _rect(item, 0, 0, W, H, p['bg'])
@@ -221,19 +267,22 @@ def build_slide(project: dict, scene: dict, index: int, project_dir: Path) -> di
                 if j<count-1:
                     _text(item,'→',x+col_w-5,405,34,28,p['accent'],True,1)
         elif layout == 'diagram_slide':
-            labels = (bullets or ['Origem', 'Processo', 'Resultado'])[:4]
-            count = len(labels)
-            bw = min(250, 1010/count-28)
-            start = (W-(count*bw+(count-1)*38))/2
-            for j, val in enumerate(labels):
-                x = start+j*(bw+38)
-                _rect(item,x,315,bw,165,p['panel'],18,p['outline'],2)
-                _rect(item,x,315,bw,11,p['accent'],7)
-                _text(item,val,x+15,357,bw-30,24,p['fg'],True,3,'center')
-                if j<count-1:
-                    _line(item,x+bw+7,398,x+bw+31,398,p['accent'],5)
-                    _text(item,'›',x+bw+6,367,32,30,p['accent'],True,1,'center')
-            _text(item,'FLUXO DE REFERÊNCIA  •  esquema ilustrativo',64,557,1150,16,p['muted'],False,1,'center')
+            if scene.get('diagram'):
+                _technical_diagram(item, Diagram.model_validate(scene['diagram']), p)
+            else:
+                labels = (bullets or ['Origem', 'Processo', 'Resultado'])[:4]
+                count = len(labels)
+                bw = min(250, 1010/count-28)
+                start = (W-(count*bw+(count-1)*38))/2
+                for j, val in enumerate(labels):
+                    x = start+j*(bw+38)
+                    _rect(item,x,315,bw,165,p['panel'],18,p['outline'],2)
+                    _rect(item,x,315,bw,11,p['accent'],7)
+                    _text(item,val,x+15,357,bw-30,24,p['fg'],True,3,'center')
+                    if j<count-1:
+                        _line(item,x+bw+7,398,x+bw+31,398,p['accent'],5)
+                        _text(item,'›',x+bw+6,367,32,30,p['accent'],True,1,'center')
+                _text(item,'FLUXO DE REFERÊNCIA  •  esquema ilustrativo',64,557,1150,16,p['muted'],False,1,'center')
         elif layout == 'practical_example':
             _rect(item, 64, 218, 1152, 397, p['panel'],22)
             _rect(item, 94, 250, 173, 43, p['accent'], 12)

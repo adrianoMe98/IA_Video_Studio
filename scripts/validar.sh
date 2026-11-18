@@ -12,8 +12,8 @@ fi
 python3 tools/validate_workflow.py
 if command -v docker >/dev/null 2>&1;then
   docker compose config --quiet
-  docker compose -f compose.yaml -f compose.comfy.yaml --profile wan config --quiet
-  if docker image inspect ia-video-studio:1.3-local >/dev/null 2>&1; then
+  docker compose -f compose.yaml -f compose.comfy.yaml --profile wan --profile imagens-ia config --quiet
+  if docker image inspect ia-video-studio:1.4-local >/dev/null 2>&1; then
     echo '[INFO] Testando APIs e renderização PDF/PPTX na imagem Docker.'
     docker compose run --rm --no-deps --entrypoint python studio -m unittest discover -s /opt/tests -v
   else

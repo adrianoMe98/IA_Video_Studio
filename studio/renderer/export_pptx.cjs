@@ -22,7 +22,8 @@ for(const plan of slides){
       slide.addShape(pptx.ShapeType.ellipse,{x:X(e.x),y:X(e.y),w:X(e.w),h:X(e.h),
         line:{color:color(e.fill),transparency:100},fill:{color:color(e.fill)}});
     } else if(e.type==='line'){
-      slide.addShape(pptx.ShapeType.line,{x:X(e.x),y:X(e.y),w:X(e.x2-e.x),h:X(e.y2-e.y),
+      slide.addShape(pptx.ShapeType.line,{x:X(Math.min(e.x,e.x2)),y:X(Math.min(e.y,e.y2)),
+        w:X(Math.abs(e.x2-e.x)),h:X(Math.abs(e.y2-e.y)),flipV:(e.x2-e.x)*(e.y2-e.y)<0,
         line:{color:color(e.stroke),width:Math.max(0.5,e.sw*.75)}});
     } else if(e.type==='text'){
       slide.addText(e.lines.join('\n'),{x:X(e.x),y:X(e.y+3),w:X(e.w),h:X(e.h),

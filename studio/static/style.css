@@ -49,3 +49,11 @@
 #slides-only-links{padding:10px 0}
 @media(max-width:1050px){.slide-studio-actions{grid-template-columns:1fr 1fr}.slide-studio-actions label{grid-column:1/-1}}
 @media(max-width:600px){.slide-studio-actions,.scene-meta{grid-template-columns:1fr}.slide-studio-actions label{grid-column:auto}}
+
+.image-card{display:grid;gap:7px;padding:10px;border:1px solid #324667;border-radius:9px;width:min(190px,100%);overflow-wrap:anywhere}
+.asset-gallery .image-card img{width:100%;height:auto;aspect-ratio:3/2;object-fit:contain}
+.image-generation,.diagram-source{background:#101c30;border:1px solid #324667;border-radius:10px;margin-top:14px;padding:14px}
+.image-generation img{display:block;max-width:min(100%,420px);margin:12px 0;border-radius:8px}
+.diagram-source summary{cursor:pointer}
+.diagram-source label,#asset-form label{display:block;margin-top:9px}
+.diagram-source textarea{font-family:monospace}

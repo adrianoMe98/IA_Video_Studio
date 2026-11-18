@@ -9,6 +9,16 @@ let viewMode = 'active';
 let activeProjects = [];
 let trashedProjects = [];
 let assets = [];
+let imageEnabled = false;
+let imageJob = null;
+let imagePanelOpen = false;
+let editingAsset = null;
+let projectLoad = 0;
+let imageRefresh = 0;
+const exampleDiagram = {
+  nodes: [{id:'olt', label:'OLT'}, {id:'splitter', label:'Splitter'}, {id:'ontA', label:'ONT A'}, {id:'ontB', label:'ONT B'}],
+  edges: [{source:'olt', target:'splitter'}, {source:'splitter', target:'ontA'}, {source:'splitter', target:'ontB'}],
+};
 const layouts = {auto:'Automático',hero_cover:'Capa',learning_objectives:'Objetivos',concept_explainer:'Conceito',two_column_explanation:'Texto + imagem',comparison_table:'Comparação',step_by_step:'Passo a passo',diagram_slide:'Topologia / diagrama',practical_example:'Exemplo prático',quiz_slide:'Quiz / exercício',summary_slide:'Resumo'};
 const files = ['video.mp4','video_legendas.mp4','slides.pdf','slides.pptx','slides.md','legendas.srt'];
 
@@ -21,7 +31,10 @@ async function request(url, opts = {}) {
   const response = await fetch(url, opts);
   let json;
   try { json = await response.json(); } catch { json = null; }
-  if (!response.ok) throw new Error(json?.detail || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const detail = json?.detail;
+    throw new Error(Array.isArray(detail) ? detail.map(item => item.msg).join(' ') : detail || `HTTP ${response.status}`);
+  }
   return json;
 }
 function jsonOpt(method, data) {
@@ -84,6 +97,7 @@ function askDialog({title, description, label = '', value = '', confirmText = 'C
   });
 }
 function clearEditor() {
+  projectLoad++;
   selected = null;
   assets = [];
   $('preview-panel').classList.add('hidden');
@@ -132,16 +146,35 @@ async function actionOnProject(action, id) {
 
 function sceneHtml(scene, i) {
   const opts = Object.entries(layouts).map(([id,name]) => `<option value="${id}" ${scene.layout===id?'selected':''}>${esc(name)}</option>`).join('');
-  const media = `<option value="">Sem imagem</option>`+assets.map(a=>`<option value="${esc(a.id)}" ${scene.image===a.id?'selected':''}>${esc(a.id.slice(0,9))} · Imagem</option>`).join('');
-  return `<div class="scene"><div class="scenehead"><span>CENA ${String(i+1).padStart(2,'0')}</span><div class="rowbuttons"><button type="button" class="preview-button" data-preview="${i}">◧ Prévia</button><button data-remove="${i}" aria-label="Excluir cena ${i+1}">Excluir</button></div></div>
+  const media = `<option value="">Sem imagem</option>`+assets.map(a=>`<option value="${esc(a.id)}" ${scene.image===a.id?'selected':''}>${esc(a.title || a.id.slice(0,9))}</option>`).join('');
+  const diagram = scene.diagramSource ?? (scene.diagram ? JSON.stringify(scene.diagram, null, 2) : '');
+  const generate = imageEnabled ? `<button type="button" class="preview-button" data-illustrate="${i}">Gerar imagem</button>` : '';
+  return `<div class="scene"><div class="scenehead"><span>CENA ${String(i+1).padStart(2,'0')}</span><div class="rowbuttons"><button type="button" class="preview-button" data-preview="${i}">◧ Prévia</button>${generate}<button data-remove="${i}" aria-label="Excluir cena ${i+1}">Excluir</button></div></div>
     <div class="scene-meta"><label>Bloco visual<select class="scene-layout">${opts}</select></label><label>Imagem da biblioteca<select class="scene-image">${media}</select></label></div>
     <div class="scenebody"><label class="title">Título do slide<input class="stitle" maxlength="120" value="${esc(scene.title)}" placeholder="Título da cena"></label>
     <label>Tópicos do slide (um por linha)<textarea class="bullets" placeholder="Ponto 1&#10;Ponto 2">${esc((scene.bullets || []).join('\n'))}</textarea></label>
-    <label>Texto narrado em português<textarea class="narration" placeholder="Digite a explicação que será narrada...">${esc(scene.narration)}</textarea></label></div></div>`;
+    <label>Texto narrado em português<textarea class="narration" placeholder="Digite a explicação que será narrada...">${esc(scene.narration)}</textarea></label></div>
+    <details class="diagram-source" ${diagram ? 'open' : ''}>
+      <summary>Diagrama técnico</summary>
+      <label>Grafo em JSON<textarea class="scene-diagram" spellcheck="false">${esc(diagram)}</textarea></label>
+      <button type="button" class="small" data-diagram-example>Preencher exemplo GPON</button>
+    </details></div>`;
 }
 function renderScenes(scenes) {
   $('scenes').innerHTML = scenes.map(sceneHtml).join('');
   $('scenes').querySelectorAll('[data-preview]').forEach(button => button.addEventListener('click', () => previewSlide(Number(button.dataset.preview))));
+  $('scenes').querySelectorAll('[data-illustrate]').forEach(button => button.addEventListener('click', () => {
+    const scene = collectScenes()[Number(button.dataset.illustrate)];
+    imagePanelOpen = true;
+    $('image-prompt').value = `Ilustração didática sobre ${scene.title}`.slice(0, 1000);
+    renderImageJob();
+    ($('image-generation-form').classList.contains('hidden') ? $('image-job-status') : $('image-prompt')).focus();
+  }));
+  $('scenes').querySelectorAll('[data-diagram-example]').forEach(button => button.addEventListener('click', () => {
+    const source = button.closest('details').querySelector('textarea');
+    if (!source.value.trim()) source.value = JSON.stringify(exampleDiagram, null, 2);
+    source.focus();
+  }));
   $('scenes').querySelectorAll('[data-remove]').forEach(button => button.addEventListener('click', () => {
     const all = collectScenes();
     if (all.length <= 1) { toast('Mantenha ao menos uma cena.'); return; }
@@ -156,6 +189,7 @@ function collectScenes() {
     narration: box.querySelector('.narration').value.trim(),
     layout: box.querySelector('.scene-layout').value,
     image: box.querySelector('.scene-image').value,
+    diagramSource: box.querySelector('.scene-diagram').value,
   }));
 }
 function payload() {
@@ -166,7 +200,16 @@ function payload() {
     quality: $('quality').value,
     burn_subtitles: $('burn').checked,
     slide_theme: $('slide-theme').value,
-    scenes: collectScenes(),
+    scenes: collectScenes().map(({diagramSource, ...scene}, i) => {
+      if (diagramSource.trim()) {
+        try { scene.diagram = JSON.parse(diagramSource); }
+        catch { throw new Error(`Revise o JSON do diagrama na cena ${i + 1}.`); }
+        if (!scene.diagram || typeof scene.diagram !== 'object' || Array.isArray(scene.diagram)) {
+          throw new Error(`Informe um objeto com nós e conexões na cena ${i + 1}.`);
+        }
+      }
+      return scene;
+    }),
   };
 }
 function populate(p) {
@@ -186,12 +229,25 @@ function populate(p) {
   $('video').removeAttribute('src');
 }
 async function loadProject(pid) {
+  const load = ++projectLoad;
   try {
-    const p = await request(`/api/projects/${pid}`);
+    const [p, media, capability, job] = await Promise.all([
+      request(`/api/projects/${pid}`), request(`/api/projects/${pid}/assets`),
+      request('/api/image-generation'), request(`/api/projects/${pid}/image-job`),
+    ]);
+    if (load !== projectLoad) return;
     selected = pid;
     viewMode = 'active';
-    assets = await request(`/api/projects/${pid}/assets`);
+    imageRefresh++;
+    assets = media;
+    imageEnabled = capability.enabled;
+    imageJob = job;
+    imagePanelOpen = false;
+    $('image-prompt').value = '';
+    $('asset-search').value = '';
+    $('asset-origin').value = '';
     populate(p);
+    renderImageJob();
     renderAssetGallery();
     await refreshList();
     await refreshJob();
@@ -294,7 +350,10 @@ $('save').addEventListener('click', saveClick);
 $('render').addEventListener('click', startRender);
 $('upload').addEventListener('change', upload);
 Promise.all([refreshList(),checkHealth()]).catch(err => toast(err.message));
-polling = setInterval(() => { if(selected) refreshJob(); }, 2400);
+polling = setInterval(() => {
+  if (selected) refreshJob();
+  if (selected && ['queued', 'running'].includes(imageJob?.status)) refreshImageJob(selected).catch(err => toast(err.message));
+}, 2400);
 $('generate').addEventListener('click', async () => {
   if (!selected) return toast('Selecione um projeto.');
   $('generate').disabled = true;
@@ -311,9 +370,124 @@ $('generate').addEventListener('click', async () => {
   }
 });
 
-// Slide Studio v1.3 — recursos visuais e exportações de slides sem voz.
+// Biblioteca e geração de ilustrações
 function renderAssetGallery() {
-  $('asset-gallery').innerHTML = assets.length ? assets.map(a=>`<img src="/api/projects/${selected}/assets/${encodeURIComponent(a.id)}" alt="Imagem da biblioteca" title="${esc(a.id)}" loading="lazy">`).join('') : '<small>Biblioteca vazia. Carregue uma imagem para ilustrar a aula.</small>';
+  const search = $('asset-search').value.trim().toLocaleLowerCase('pt-BR');
+  const origin = $('asset-origin').value;
+  const filtered = assets.filter(asset => (!origin || asset.origin === origin) &&
+    [asset.title, asset.alt, asset.license, ...(asset.tags || [])].join(' ').toLocaleLowerCase('pt-BR').includes(search));
+  $('asset-gallery').innerHTML = filtered.length ? filtered.map(asset => `
+    <article class="image-card">
+      <img src="/api/projects/${selected}/assets/${encodeURIComponent(asset.id)}" alt="${esc(asset.alt || 'Imagem da biblioteca')}" loading="lazy">
+      <b>${esc(asset.title || 'Imagem importada')}</b>
+      <small>${asset.origin === 'ai' ? 'Ilustração gerada por IA' : 'Importada'}${asset.tags?.length ? ` · ${esc(asset.tags.join(', '))}` : ''}</small>
+      <div class="rowbuttons">
+        <button type="button" class="small" data-edit-asset="${esc(asset.id)}">Detalhes</button>
+        <button type="button" class="small danger" data-delete-asset="${esc(asset.id)}">Excluir</button>
+      </div>
+    </article>`).join('') : '<small>Nenhuma imagem encontrada.</small>';
+}
+async function refreshAssets(pid) {
+  const media = await request(`/api/projects/${pid}/assets`);
+  if (selected !== pid) return;
+  const scenes = collectScenes();
+  assets = media;
+  renderScenes(scenes);
+  renderAssetGallery();
+}
+function renderImageJob() {
+  const status = imageJob?.status;
+  const active = ['queued', 'running'].includes(status);
+  const ready = status === 'ready';
+  $('image-generation').classList.toggle('hidden', !(imagePanelOpen || active || ready || status === 'error'));
+  $('image-generation-form').classList.toggle('hidden', !imageEnabled || active || ready);
+  $('image-job-status').textContent = {
+    queued: 'Ilustração na fila.', running: 'Gerando ilustração localmente…',
+    ready: 'Revise a fidelidade técnica da ilustração antes de aprovar.',
+    error: imageJob?.message, cancelled: 'Geração descartada.',
+  }[status] || '';
+  $('approve-image').classList.toggle('hidden', !ready);
+  $('discard-image').classList.toggle('hidden', !active && !ready);
+  $('image-draft').classList.toggle('hidden', !ready);
+  if (ready) $('image-draft').src = `/api/projects/${selected}/image-job/${imageJob.id}/preview`;
+  else $('image-draft').removeAttribute('src');
+}
+async function refreshImageJob(pid) {
+  const refresh = ++imageRefresh;
+  const job = await request(`/api/projects/${pid}/image-job`);
+  if (pid !== selected || refresh !== imageRefresh) return;
+  imageJob = job;
+  renderImageJob();
+}
+$('asset-search').addEventListener('input', renderAssetGallery);
+$('asset-origin').addEventListener('change', renderAssetGallery);
+$('asset-gallery').addEventListener('click', async event => {
+  const edit = event.target.closest('[data-edit-asset]');
+  const remove = event.target.closest('[data-delete-asset]');
+  if (edit) {
+    const asset = assets.find(item => item.id === edit.dataset.editAsset);
+    editingAsset = {id: asset.id, pid: selected};
+    $('asset-title').value = asset.title || '';
+    $('asset-alt').value = asset.alt || '';
+    $('asset-tags').value = (asset.tags || []).join(', ');
+    $('asset-license').value = asset.license || '';
+    $('asset-provenance').textContent = asset.origin === 'ai' ? `Gerada por IA · ${asset.model}${asset.model_revision ? ` (${asset.model_revision})` : ''} · seed ${asset.seed} · ${asset.prompt}` : 'Imagem importada';
+    $('asset-dialog').showModal();
+  }
+  if (remove) {
+    const pid = selected;
+    const id = remove.dataset.deleteAsset;
+    const scenes = collectScenes().flatMap((scene, index) => scene.image === id ? [index + 1] : []);
+    if (scenes.length) return toast(`Desvincule a imagem das cenas ${scenes.join(', ')} e salve o projeto.`);
+    const confirmed = await askDialog({title:'Excluir imagem', description:'A imagem será removida da biblioteca deste projeto.', confirmText:'Excluir', danger:true});
+    if (!confirmed || selected !== pid) return;
+    try {
+      await request(`/api/projects/${pid}/assets/${encodeURIComponent(id)}`, {method:'DELETE'});
+      await refreshAssets(pid);
+    } catch (err) { toast(err.message); }
+  }
+});
+$('close-asset-dialog').addEventListener('click', () => $('asset-dialog').close());
+$('asset-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const {pid, id} = editingAsset;
+  const metadata = {
+    title: $('asset-title').value.trim(), alt: $('asset-alt').value.trim(),
+    tags: $('asset-tags').value.split(',').map(tag => tag.trim()).filter(Boolean),
+    license: $('asset-license').value.trim(),
+  };
+  try {
+    await request(`/api/projects/${pid}/assets/${encodeURIComponent(id)}`, jsonOpt('PATCH', metadata));
+    $('asset-dialog').close();
+    await refreshAssets(pid);
+  } catch (err) { toast(err.message); }
+});
+$('image-generation-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const pid = selected;
+  $('start-image').disabled = true;
+  try {
+    await request(`/api/projects/${pid}/image-job`, jsonOpt('POST', {prompt: $('image-prompt').value}));
+    await refreshImageJob(pid);
+  } catch (err) { toast(err.message); }
+  finally { $('start-image').disabled = false; }
+});
+for (const [buttonId, suffix, method] of [
+  ['approve-image', '/approve', 'POST'], ['discard-image', '', 'DELETE'],
+]) {
+  $(buttonId).addEventListener('click', async () => {
+    const pid = selected;
+    $(buttonId).disabled = true;
+    try {
+      await request(`/api/projects/${pid}/image-job/${imageJob.id}${suffix}`, {method});
+      if (suffix) {
+        await refreshAssets(pid);
+        toast('Imagem aprovada. Selecione-a na cena e use um bloco como Texto + imagem.');
+      }
+      await refreshImageJob(pid);
+    } catch (err) { toast(err.message); }
+    finally { $(buttonId).disabled = false; }
+  });
 }
 async function previewSlide(index) {
   try {
@@ -329,12 +503,10 @@ async function uploadImage() {
   if (!selected || !f) return;
   if (f.size > 6*1024*1024) return toast('Imagem muito grande. Máximo 6 MB.');
   try {
-    const current = collectScenes();
+    const pid = selected;
     const fd = new FormData();fd.append('file', f);
-    const result = await request(`/api/projects/${selected}/assets`,{method:'POST',body:fd});
-    assets = await request(`/api/projects/${selected}/assets`);
-    renderScenes(current);
-    renderAssetGallery();
+    await request(`/api/projects/${pid}/assets`,{method:'POST',body:fd});
+    await refreshAssets(pid);
     toast('Imagem recebida. Selecione-a no bloco da cena desejada.');
   } catch(err) {toast(err.message);}
   finally {$('image-upload').value='';}

@@ -1,12 +1,38 @@
-# IA Video Studio v1.3 — Slide Studio
+# IA Video Studio v1.4 — Slide Studio
 
 Plataforma Docker de produção de **videoaulas, cursos e apresentações profissionais em PT-BR**, com blocos inteligentes e layout customizado. Derivada da v1.2, preserva o módulo de videoaulas e o **Wan/ComfyUI** opcional.
 
 **Alvo inicial:** Debian Sid, Lenovo IdeaPad Gaming 3i, i5-10300H, 16 GB RAM, GTX 1650 4 GB. O **Slide Studio e as videoaulas usam CPU**, sem exigir a GPU. ComfyUI permanece um serviço GPU separado.
 
-**Status:** 16 testes automatizados locais aprovados, incluindo geração efetiva de **PDF com 3 páginas**, **PPTX editável com 3 slides**, importação de PNG, prévia e regressão da API v1.2. O funcionamento completo do `docker compose build` e a síntese real com Piper ainda precisam ser testados no notebook. Não atribuir aos slides a condição de “imagens geradas por IA”: a versão 1.3 suporta upload de imagens, diagrama automático e desenho procedural, mas **não gera novas fotografias por modelo de difusão** (planejado para v1.4).
+## Novidades v1.4
 
-## Novidades v1.3
+- **Ilustrações educativas com IA opcional** via ComfyUI local, com fila de uma geração, prévia, aprovação e registro de procedência.
+- **Diagramas técnicos** com nós, conexões direcionadas, ramificações, rótulos e grupos identificados. As formas e os textos continuam editáveis no PPTX.
+- **Biblioteca por projeto** com miniaturas, busca, filtros por origem, edição de detalhes e proteção contra exclusão de imagens em uso.
+
+### Atualizar da v1.3
+
+Na mesma pasta de instalação, pare os serviços com `docker compose down` usando a configuração original. Faça backup de `studio-data`, `data`, `.env` e, se usado, do volume nomeado do Ollama. Atualize os arquivos da aplicação e execute `./scripts/preparar.sh && docker compose up -d --build studio`. O script preserva o `.env` existente. Mantenha o diretório de instalação e os caminhos das montagens, ou copie os dados para o novo diretório antes de iniciar. Use o backup para voltar à v1.3, pois editar projetos com o schema anterior pode descartar campos da v1.4.
+
+### Ativar ilustrações educativas
+
+1. Coloque um checkpoint **SD 1.5** em formato `.safetensors` de uma fonte confiável em `data/models/checkpoints/`. Confira a licença e a revisão antes de usar. O Studio usa os arquivos já baixados pelo operador.
+2. Configure `COMFY_IMAGE_URL=http://comfyui:8188` e `COMFY_IMAGE_CHECKPOINT=nome-do-arquivo.safetensors` no `.env`. Para registrar a revisão ou o SHA-256 do checkpoint nas imagens aprovadas, preencha também `COMFY_IMAGE_MODEL_REVISION`. Para ativar os serviços, execute:
+
+   ```bash
+   docker compose -f compose.yaml -f compose.comfy.yaml --profile imagens-ia up -d --build studio comfyui
+   ```
+
+3. Em uma cena, clique **Gerar imagem**, revise o prompt e aguarde a prévia. Aprove após conferir a fidelidade técnica. Selecione a imagem na cena e escolha um bloco que exiba imagens, como **Texto + imagem**. O botão **Descartar** abandona o resultado no Studio. Um job já submetido pode terminar no ComfyUI, que grava sua saída em `data/output/studio-educativo/`.
+4. Para desativar, deixe os dois campos vazios e recrie o serviço `studio`. Imagens aprovadas permanecem no projeto e seguem disponíveis nas exportações.
+
+O preset inicial usa 512 × 512 e lote 1. Na GTX 1650 de 4 GB, execute geração de imagem e jobs Wan em sessões separadas. O Studio verifica se o ComfyUI está ocioso antes de submeter. Verifique o driver, o Toolkit, o pico de VRAM e a inferência real no notebook antes de adotar o preset para produção.
+
+### Editar um diagrama técnico
+
+Abra **Diagrama técnico** na cena e use **Preencher exemplo GPON** para começar. O JSON contém `nodes` (com `id`, `label` e `group` opcional) e `edges` (com `source`, `target` e `label` opcional). Use IDs únicos e conexões sem ciclos. O layout aceita até 12 nós, 16 conexões e quatro colunas com até quatro nós cada. Salvando uma fonte válida, a cena usa o bloco de diagrama. Limpe o campo para voltar ao bloco selecionado.
+
+## Recursos introduzidos na v1.3
 
 - Novo painel **Slide Studio** no editor existente, com pré-visualização por slide em SVG.
 - **10 blocos inteligentes:** Capa, Objetivos, Conceito, Texto+Imagem, Comparação, Passo a Passo, Diagrama, Exemplo, Quiz e Resumo.
@@ -20,7 +46,7 @@ Plataforma Docker de produção de **videoaulas, cursos e apresentações profis
 - Projetos antigos continuam carregando sem alteração de JSON; novos campos têm valores padrão.
 - Renomear, duplicar (inclusive mídias), pesquisar, excluir, lixeira e restaurar continuam funcionando.
 
-## Atualizar v1.2 → v1.3, sem perder projetos
+## Migrar a partir da v1.2
 
 Coloque as pastas de versão lado a lado em `~/Downloads`. **Nunca use `docker compose down -v`, nem apague `studio-data`**.
 
@@ -34,7 +60,7 @@ mkdir -p ~/Backups
 tar -czf "$HOME/Backups/ia-video-v1.2-$(date +%F).tar.gz" studio-data
 
 # 3) Migre para a pasta nova
-cd ~/Downloads/ia-video-studio-v1.3
+cd ~/Downloads/ia-video-studio-v1.4
 ./scripts/migrar-v1.2.sh ../ia-video-studio-v1.2
 # Use --comfy no final se quiser copiar também os modelos, workflows e saídas Wan.
 
@@ -45,12 +71,12 @@ docker compose ps
 curl -f http://127.0.0.1:8787/api/health
 ```
 
-Se o projeto antigo estiver em outro diretório, informe seu caminho absoluto a `migrar-v1.2.sh`. O script **não sobrescreve** projetos com IDs existentes no destino e mantém a pasta v1.2 original intacta. Se a v1.3 já tiver um container homônimo, pare-o antes de migrar. As vozes são copiadas; não precisam ser baixadas novamente.
+Se o projeto antigo estiver em outro diretório, informe seu caminho absoluto a `migrar-v1.2.sh`. O script **não sobrescreve** projetos com IDs existentes no destino e mantém a pasta v1.2 original intacta. Se a v1.4 já tiver um container homônimo, pare-o antes de migrar. As vozes são copiadas; não precisam ser baixadas novamente.
 
 ### Instalação do zero
 
 ```bash
-cd ia-video-studio-v1.3
+cd ia-video-studio-v1.4
 ./scripts/preparar.sh
 docker compose build studio
 ./scripts/baixar-voz.sh    # necessário apenas para narração
@@ -101,7 +127,7 @@ ComfyUI: **http://127.0.0.1:8188**. Os 4 GB da GTX 1650 são limitantes e o Wan 
 ## Diretórios
 
 ```text
-ia-video-studio-v1.3/
+ia-video-studio-v1.4/
 ├── Dockerfile.studio                 # CPU, CairoSVG, PptxGenJS e Piper
 ├── Dockerfile.comfy                  # GPU/ComfyUI opcional
 ├── compose.yaml                     # Studio + voz + Ollama opcional
@@ -123,7 +149,7 @@ ia-video-studio-v1.3/
 │   └── voices/                      # modelos de voz do Piper
 ├── docs/ARQUITETURA.md              # API, escolhas técnicas e extensões
 ├── scripts/migrar-v1.2.sh
-├── tests/                            # 16 testes automatizados
+├── tests/                            # testes automatizados
 └── data/                             # modelos Wan opcionais
 ```
 
@@ -137,7 +163,7 @@ docker compose logs -f --tail=100 studio
 docker stats ia-video-studio
 ./scripts/diagnostico.sh
 
-# Após instalar dependências Python de studio/requirements.txt e PptxGenJS no HOST:
+# Após instalar studio/requirements.txt, studio/requirements-test.txt e PptxGenJS no host:
 NODE_PATH=$(npm root -g) python3 -m unittest discover -s tests -v
 
 # Recomendado após build: executar testes usando dependências da própria imagem
@@ -149,14 +175,13 @@ for f in scripts/*.sh; do bash -n "$f"; done
 docker compose down
 ```
 
-**Testes executados nesta entrega:** testes da API (projetos, importação, mídia, layouts), validação de PPTX com conteúdo nativo e PDF de múltiplas páginas. **Não houve execução completa com voz real no Lenovo**, nem benchmark com GTX 1650. O build Docker e a experiência de navegação precisam ser validados na máquina de destino. Se o container acusar permissão em `studio-data`, confira `PUID`/`PGID` no `.env` e permissões de diretórios.
+A suíte verifica APIs, mídia, prévia SVG, exportação PDF/PPTX e o fluxo da geração com um ComfyUI simulado. Voz Piper real e inferência em GPU devem ser verificadas no equipamento-alvo. Se o contêiner acusar permissão em `studio-data`, confira `PUID`/`PGID` no `.env` e as permissões do diretório.
 
 ## Limitações conhecidas / próximo ciclo
 
-- A IA **ainda não produz fotografias novas**: integração opcional de ComfyUI/Flux/SD na v1.4, com verificação humana de representações técnicas.
 - Preview é **por slide salvo**, não drag-and-drop; o próprio usuário escolhe o bloco de layout e a imagem.
 - A exportação PPTX preserva texto e formas editáveis, mas utiliza fontes disponíveis no ambiente; revise aparência em PowerPoint e LibreOffice.
-- Diagramas têm fluxo simples da esquerda para a direita; diagramas complexos e editor gráfico ficam para o próximo ciclo.
+- Diagramas técnicos usam um grafo em JSON e disposição em colunas. O editor gráfico livre e a importação de Mermaid/D2 ficam para um ciclo posterior.
 - A renderização de slides está limitada aos 30 slides por projeto herdados da v1.2. Expandir esse limite exigirá atualização dos fluxos e testes de memória.
 - O export de slides usa CPU e pode consumir recursos por alguns segundos em apresentações longas. Não execute múltiplas renderizações simultâneas.
 

@@ -1,7 +1,6 @@
-"""API local do IA Video Studio 1.3 / Slide Studio."""
+"""API local do IA Video Studio."""
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
@@ -12,17 +11,20 @@ from urllib import error as urlerror, request as urlrequest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from pypdf import PdfReader
-from PIL import Image, ImageOps, UnidentifiedImageError
-from fastapi.responses import Response
-from slide_studio import LAYOUTS, THEMES, as_svg, build_slide, render_slides, suggest_layout
+from PIL import Image
 
+import image_generation
 from core import VOICES, draft_from_text, export_project
+from diagrams import Diagram
+from media import MAX_UPLOAD, add_asset, asset_info, asset_path, normalize_image
+from slide_studio import LAYOUTS, THEMES, as_svg, build_slide, render_slides, suggest_layout
 
 BASE = Path(os.environ.get('STUDIO_DATA', '/data'))
 PROJECTS = BASE / 'projects'
@@ -45,12 +47,15 @@ for old_job in PROJECTS.glob('*/job.json'):
         pass
 
 
-app = FastAPI(title='IA Video Studio', version='1.3.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='IA Video Studio', version='1.4.0', docs_url=None, redoc_url=None)
 app.mount('/static', StaticFiles(directory=str(STATIC)), name='static')
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='render')
 job_lock = threading.Lock()
 running_projects: set[str] = set()
-
+image_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='image')
+image_slot = threading.Lock()
+IMAGE_JOB = 'image-job.json'
+IMAGE_DRAFT = 'image-draft.png'
 
 class RenameProject(BaseModel):
     title: str = Field(min_length=1, max_length=120)
@@ -63,6 +68,7 @@ class ConfirmRemoval(BaseModel):
 class Scene(BaseModel):
     layout: str = 'auto'
     image: str = ''
+    diagram: Diagram | None = None
     title: str = Field(min_length=1, max_length=120)
     bullets: list[str] = Field(default_factory=list, max_length=8)
     narration: str = Field(min_length=1, max_length=4000)
@@ -79,7 +85,7 @@ class Project(BaseModel):
 
 
 def clean_project(project: Project, owner: Path | None = None) -> dict:
-    data = project.model_dump()
+    data = project.model_dump(exclude_none=True)
     if data['voice'] not in VOICES:
         raise HTTPException(400, 'Voz não reconhecida.')
     if data['quality'] not in ('720', '1080'):
@@ -90,7 +96,7 @@ def clean_project(project: Project, owner: Path | None = None) -> dict:
         if scene['layout'] != 'auto' and scene['layout'] not in LAYOUTS:
             raise HTTPException(400, 'Bloco de slide inválido.')
         image = scene.get('image', '')
-        if image and (not re.fullmatch(r'[0-9a-f]{24}\.png', image) or owner is None or not (owner / 'assets' / image).is_file()):
+        if image and (owner is None or asset_path(owner, image) is None):
             raise HTTPException(400, 'A imagem deve pertencer à biblioteca deste projeto.')
         if not scene['narration'].strip() or not scene['title'].strip():
             raise HTTPException(400, 'Título e narração são obrigatórios.')
@@ -149,6 +155,16 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding='utf-8'))
 
 
+for old_job in PROJECTS.glob(f'*/{IMAGE_JOB}'):
+    try:
+        saved = json.loads(old_job.read_text(encoding='utf-8'))
+        if saved.get('status') in ('queued', 'running'):
+            saved.update(status='error', message='Geração interrompida pelo reinício.')
+            save_json(old_job, saved)
+    except (OSError, ValueError):
+        pass
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
@@ -179,7 +195,7 @@ def home():
 
 @app.get('/api/health')
 def health():
-    return {'status': 'ok', 'version': '1.3.0', 'voices': {
+    return {'status': 'ok', 'version': app.version, 'voices': {
         key: (VOICES_DIR / f'{name}.onnx').is_file() and (VOICES_DIR / f'{name}.onnx.json').is_file()
         for key, name in VOICES.items()
     }}
@@ -289,6 +305,8 @@ def move_to_trash(pid: str):
     with job_lock:
         folder = directory(pid)
         ensure_not_rendering(pid)
+        if read_image_job(folder)['status'] in ('queued', 'running'):
+            raise HTTPException(409, 'Aguarde ou descarte a geração de imagem.')
         destination = TRASH / pid
         if destination.exists() or destination.is_symlink():
             raise HTTPException(409, 'Este ID já existe na lixeira. Contate o administrador.')
@@ -342,51 +360,221 @@ def slide_preview(pid: str, index: int):
     })
 
 
+class AssetMetadata(BaseModel):
+    title: str = Field(default='', max_length=100)
+    alt: str = Field(default='', max_length=200)
+    tags: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = Field(
+        default_factory=list, max_length=10)
+    license: str = Field(default='', max_length=120)
+
+
 @app.get('/api/projects/{pid}/assets')
 def list_assets(pid: str):
-    folder = directory(pid) / 'assets'
-    if not folder.is_dir(): return []
-    return [{'id': path.name, 'bytes': path.stat().st_size} for path in sorted(folder.iterdir())
-            if path.is_file() and not path.is_symlink() and re.fullmatch(r'[0-9a-f]{24}\.png', path.name)]
+    with job_lock:
+        project = directory(pid)
+        return [asset_info(path) for item in sorted((project / 'assets').glob('*.png'))
+                if (path := asset_path(project, item.name))]
+
+
+def existing_asset(pid: str, name: str) -> Path:
+    path = asset_path(directory(pid), name)
+    if path is None:
+        raise HTTPException(404, 'Imagem não encontrada.')
+    return path
 
 
 @app.get('/api/projects/{pid}/assets/{asset}')
 def get_asset(pid: str, asset: str):
-    if not re.fullmatch(r'[0-9a-f]{24}\.png', asset):
-        raise HTTPException(404, 'Imagem inválida.')
-    path = directory(pid) / 'assets' / asset
-    if path.is_symlink() or not path.is_file():
-        raise HTTPException(404, 'Imagem não encontrada.')
-    return FileResponse(path, media_type='image/png', headers={'Cache-Control':'private, max-age=3600'})
+    return FileResponse(existing_asset(pid, asset), media_type='image/png',
+                        headers={'Cache-Control': 'private, max-age=3600'})
 
 
 @app.post('/api/projects/{pid}/assets', status_code=201)
 async def upload_asset(pid: str, file: UploadFile = File(...)):
-    # Aceita apenas imagem raster; reprocessa para PNG para descartar metadados.
-    content = await file.read(6 * 1024 * 1024 + 1)
-    if len(content) > 6 * 1024 * 1024:
-        raise HTTPException(413, 'Imagem maior que 6 MB.')
     try:
-        img = Image.open(io.BytesIO(content))
-        if img.format not in ('PNG', 'JPEG', 'WEBP') or img.width > 4000 or img.height > 4000 or img.width*img.height > 12_000_000:
-            raise ValueError('Imagem inválida ou muito grande.')
-        img = ImageOps.exif_transpose(img).convert('RGB')
-        buffer = io.BytesIO()
-        img.save(buffer, format='PNG', optimize=True)
-        if buffer.tell() > 8 * 1024 * 1024:
-            raise ValueError('Imagem PNG resultante muito grande.')
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        png = normalize_image(await file.read(MAX_UPLOAD + 1))
+    except OverflowError as exc:
+        raise HTTPException(413, 'Imagem maior que 6 MB.') from exc
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
         raise HTTPException(422, 'Envie PNG, JPG ou WebP válido, até 4000px.') from exc
     with job_lock:
         folder = directory(pid)
         ensure_not_rendering(pid)
-        assets = folder / 'assets'
-        assets.mkdir(exist_ok=True)
-        if len(list(assets.glob('*.png'))) >= 40:
-            raise HTTPException(400, 'Limite de 40 imagens por projeto.')
-        filename = uuid.uuid4().hex[:24] + '.png'
-        (assets / filename).write_bytes(buffer.getvalue())
-    return {'id':filename, 'bytes':buffer.tell()}
+        try:
+            return add_asset(folder, uuid.uuid4().hex[:24] + '.png', png,
+                             {'origin': 'upload', 'created_at': now()}, save_json)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+@app.patch('/api/projects/{pid}/assets/{asset}')
+def edit_asset(pid: str, asset: str, metadata: AssetMetadata):
+    with job_lock:
+        ensure_not_rendering(pid)
+        path = existing_asset(pid, asset)
+        info = asset_info(path)
+        info.pop('id')
+        info.pop('bytes')
+        details = metadata.model_dump(exclude_unset=True)
+        if 'tags' in details:
+            details['tags'] = list(dict.fromkeys(tag for tag in metadata.tags if tag))
+        save_json(path.with_suffix('.json'), info | details)
+        return asset_info(path)
+
+
+@app.delete('/api/projects/{pid}/assets/{asset}')
+def delete_asset(pid: str, asset: str):
+    with job_lock:
+        ensure_not_rendering(pid)
+        path = existing_asset(pid, asset)
+        project = load_json(directory(pid) / 'project.json')
+        scenes = [index for index, scene in enumerate(project['scenes'], 1) if scene.get('image') == asset]
+        if scenes:
+            raise HTTPException(409, 'Desvincule a imagem dos slides ' + ', '.join(map(str, scenes)) + '.')
+        path.unlink()
+        path.with_suffix('.json').unlink(missing_ok=True)
+    return {'status': 'deleted'}
+
+
+class ImagePrompt(BaseModel):
+    prompt: str = Field(min_length=1, max_length=1000)
+
+
+def read_image_job(folder: Path):
+    path = folder / IMAGE_JOB
+    return load_json(path) if path.is_file() else {'status': 'none'}
+
+
+def matching_image_job(folder: Path, job_id: str):
+    job = read_image_job(folder)
+    if job.get('id') != job_id:
+        raise HTTPException(404, 'Geração não encontrada.')
+    return job
+
+
+def run_image_job(pid, job_id, url, model, prompt):
+    folder = PROJECTS / pid
+    path = folder / IMAGE_JOB
+
+    def active():
+        return read_image_job(folder).get('status') == 'running'
+
+    try:
+        with job_lock:
+            job = matching_image_job(folder, job_id)
+            if job['status'] != 'queued':
+                return
+            save_json(path, job | {'status': 'running'})
+        prompt_id, seed = image_generation.submit(url, model, prompt, job_id)
+        with job_lock:
+            job = matching_image_job(folder, job_id)
+            save_json(path, job | {'prompt_id': prompt_id, 'seed': seed})
+        result = image_generation.wait_image(url, prompt_id, active)
+        if result is None:
+            return
+        png = normalize_image(result)
+        with job_lock:
+            if active():
+                (folder / IMAGE_DRAFT).write_bytes(png)
+                job = matching_image_job(folder, job_id)
+                save_json(path, job | {'status': 'ready'})
+    except (OSError, KeyError, TypeError, ValueError, HTTPException, Image.DecompressionBombError) as exc:
+        with job_lock:
+            if path.is_file() and active():
+                message = str(exc)[:250] if isinstance(exc, (ValueError, TimeoutError)) else (
+                    'Falha no ComfyUI. Confira disponibilidade, checkpoint e memória.')
+                save_json(path, read_image_job(folder) | {'status': 'error', 'message': message})
+    finally:
+        image_slot.release()
+
+
+@app.get('/api/image-generation')
+def image_capability():
+    return {'enabled': image_generation.settings() is not None}
+
+
+@app.get('/api/projects/{pid}/image-job')
+def get_image_job(pid: str):
+    return read_image_job(directory(pid))
+
+
+@app.post('/api/projects/{pid}/image-job', status_code=202)
+def start_image_job(pid: str, request: ImagePrompt):
+    config = image_generation.settings()
+    if config is None:
+        raise HTTPException(503, 'Geração de imagens desativada.')
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(400, 'Escreva o prompt da ilustração.')
+    with job_lock:
+        folder = directory(pid)
+        if read_image_job(folder)['status'] == 'ready':
+            raise HTTPException(409, 'Aprove ou descarte a imagem pendente.')
+        if not image_slot.acquire(blocking=False):
+            raise HTTPException(409, 'Já existe uma geração de imagem em andamento.')
+        try:
+            (folder / IMAGE_DRAFT).unlink(missing_ok=True)
+            job = {'id': uuid.uuid4().hex[:24], 'status': 'queued', 'prompt': prompt,
+                   'model': config[1], 'created_at': now(), 'workflow': image_generation.REVISION,
+                   'model_revision': os.environ.get('COMFY_IMAGE_MODEL_REVISION', '').strip()[:160]}
+            save_json(folder / IMAGE_JOB, job)
+            image_executor.submit(run_image_job, pid, job['id'], *config, prompt)
+        except Exception:
+            image_slot.release()
+            raise
+    return job
+
+
+@app.get('/api/projects/{pid}/image-job/{job_id}/preview')
+def preview_image_job(pid: str, job_id: str):
+    with job_lock:
+        folder = directory(pid)
+        draft = folder / IMAGE_DRAFT
+        if matching_image_job(folder, job_id)['status'] != 'ready' or not draft.is_file():
+            raise HTTPException(404, 'Imagem ainda indisponível.')
+        preview = draft.read_bytes()
+    return Response(preview, media_type='image/png', headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/projects/{pid}/image-job/{job_id}/approve')
+def approve_image_job(pid: str, job_id: str):
+    with job_lock:
+        folder = directory(pid)
+        job = matching_image_job(folder, job_id)
+        name = job_id + '.png'
+        if job['status'] == 'approved':
+            return asset_info(existing_asset(pid, name))
+        if job['status'] != 'ready':
+            raise HTTPException(409, 'A imagem ainda não pode ser aprovada.')
+        ensure_not_rendering(pid)
+        metadata = {
+            'origin': 'ai', 'title': 'Ilustração educativa', 'created_at': job['created_at'],
+            'prompt': job['prompt'], 'model': job['model'], 'seed': job['seed'],
+            'model_revision': job.get('model_revision', ''),
+            'workflow': job['workflow'], 'width': image_generation.WIDTH,
+            'height': image_generation.HEIGHT, 'steps': image_generation.STEPS,
+            'cfg': image_generation.CFG, 'sampler': 'euler',
+        }
+        try:
+            asset = add_asset(folder, name, (folder / IMAGE_DRAFT).read_bytes(), metadata, save_json)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        save_json(folder / IMAGE_JOB, job | {'status': 'approved'})
+        (folder / IMAGE_DRAFT).unlink(missing_ok=True)
+        return asset
+
+
+@app.delete('/api/projects/{pid}/image-job/{job_id}')
+def discard_image_job(pid: str, job_id: str):
+    with job_lock:
+        folder = directory(pid)
+        job = matching_image_job(folder, job_id)
+        if job['status'] not in ('queued', 'running', 'ready', 'cancelled'):
+            raise HTTPException(409, 'Esta geração não pode ser descartada.')
+        job['status'] = 'cancelled'
+        save_json(folder / IMAGE_JOB, job)
+        (folder / IMAGE_DRAFT).unlink(missing_ok=True)
+    return job
 
 
 @app.post('/api/projects/{pid}/slides/auto-layout')
@@ -396,7 +584,8 @@ def auto_layout(pid: str):
         ensure_not_rendering(pid)
         project = load_json(folder / 'project.json')
         for i, scene in enumerate(project['scenes']):
-            scene['layout'] = suggest_layout(scene['title'], scene.get('bullets', []), i, len(project['scenes']))
+            scene['layout'] = ('diagram_slide' if scene.get('diagram') else
+                               suggest_layout(scene['title'], scene.get('bullets', []), i, len(project['scenes'])))
         project['updated_at'] = now()
         save_json(folder / 'project.json', project)
     return project
@@ -461,8 +650,7 @@ def run_render(pid: str, project: dict) -> None:
 @app.post('/api/projects/{pid}/suggest')
 def suggest(pid: str, project: Project):
     """Sugestão facultativa de roteiro pelo Ollama local, nunca publicada sem revisão."""
-    directory(pid)
-    p = clean_project(project)
+    p = clean_project(project, directory(pid))
     lines = [f'TEMA: {p["title"]}', f'CONTEXTO: {p["description"]}']
     for slide in p['scenes'][:8]:
         lines.append(f'- {slide["title"]}: {slide["narration"][:450]}')

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.0 — Ilustrações, diagramas e biblioteca
+
+- Geração opcional de ilustração local pelo ComfyUI, com aprovação e procedência antes de disponibilizar na galeria.
+- Diagramas direcionados e ramificados, com grafo validado e exportação pelo plano visual compartilhado.
+- Biblioteca por projeto com pesquisa, filtros, metadados e bloqueio de exclusão de imagens usadas em cenas.
+- Compatibilidade com referências de PNG e projetos legados, sem migração obrigatória.
+- Testes de diagrama, persistência da galeria, aprovação idempotente e descarte de geração.
+
 ## v1.3.0 — Slide Studio
 
 - Nova plataforma de blocos inteligentes com 10 layouts e 4 temas.

@@ -1,6 +1,6 @@
 services:
   comfyui:
-    profiles: ["wan"]
+    profiles: ["wan", "imagens-ia"]
     image: ia-video-comfyui:local
     build:
       context: .

@@ -9,7 +9,7 @@
   <script defer src="/static/app.js"></script>
 </head>
 <body>
-  <header class="topbar"><div class="brand"><div class="mark">▶</div><div><strong>IA Video Studio</strong><span>v1.3 · Slide Studio + Videoaulas</span></div></div><div class="right"><span class="pill" id="health">Iniciando...</span><span class="chip">100% local</span></div></header>
+  <header class="topbar"><div class="brand"><div class="mark">▶</div><div><strong>IA Video Studio</strong><span>v1.4 · Slide Studio + Videoaulas</span></div></div><div class="right"><span class="pill" id="health">Iniciando...</span><span class="chip">100% local</span></div></header>
   <main class="layout">
     <aside class="sidebar">
       <div class="heading"><h2>Projetos</h2><button id="new" class="small">+ Criar</button></div>
@@ -25,14 +25,30 @@
         <div class="formrow"><label>Título do projeto<input id="title" maxlength="120" placeholder="Ex.: Curso completo de GPON"></label><label>Descrição<input id="description" maxlength="400" placeholder="Uma breve descrição"></label></div>
         <div class="formrow three"><label>Voz em português<select id="voice"><option value="faber">Faber · PT-BR (média)</option><option value="edresson">Edresson · PT-BR (leve)</option></select></label><label>Resolução<select id="quality"><option value="720">HD 720p · Mais rápido</option><option value="1080">Full HD 1080p</option></select></label><label class="check"><input type="checkbox" id="burn"> Gravar legenda na imagem</label></div>
         <section class="slide-studio-config" aria-label="Slide Studio">
-          <div class="slide-studio-banner"><div><strong>✦ Slide Studio</strong><p>Modelos profissionais, blocos inteligentes, imagens e apresentações editáveis.</p></div><span class="chip">v1.3</span></div>
+          <div class="slide-studio-banner"><div><strong>✦ Slide Studio</strong><p>Modelos profissionais, blocos inteligentes, imagens e apresentações editáveis.</p></div><span class="chip">v1.4</span></div>
           <div class="slide-studio-actions">
             <label>Tema dos slides<select id="slide-theme"><option value="tech_blue">Tech Blue · Tecnologia</option><option value="corporate_clean">Corporate Clean · Corporativo</option><option value="creative_course">Creative Course · Criativo</option><option value="minimal_focus">Minimal Focus · Minimalista</option></select></label>
             <button id="auto-layout" class="secondary" type="button">✦ Organizar slides</button>
             <button id="export-slides" type="button">Exportar PPTX + PDF</button>
           </div>
           <div class="media-upload"><label for="image-upload" class="upload-label">+ Adicionar imagem à biblioteca (PNG / JPG / WebP)</label><input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp"><p>As imagens ficam armazenadas no projeto; não são enviadas a serviços externos.</p></div>
+          <div class="formrow">
+            <label>Buscar imagens<input id="asset-search" type="search" placeholder="Título, etiqueta ou licença"></label>
+            <label>Origem<select id="asset-origin"><option value="">Todas</option><option value="upload">Importadas</option><option value="ai">Geradas por IA</option></select></label>
+          </div>
           <div id="asset-gallery" class="asset-gallery"></div>
+          <section id="image-generation" class="image-generation hidden" aria-label="Gerar ilustração com IA">
+            <form id="image-generation-form">
+              <label>Prompt da ilustração<textarea id="image-prompt" required maxlength="1000"></textarea></label>
+              <button id="start-image" type="submit">Gerar ilustração</button>
+            </form>
+            <p id="image-job-status" role="status" tabindex="-1"></p>
+            <img id="image-draft" class="hidden" alt="Ilustração gerada para revisão">
+            <div class="rowbuttons">
+              <button id="approve-image" class="hidden" type="button">Aprovar para a biblioteca</button>
+              <button id="discard-image" class="secondary hidden" type="button">Descartar</button>
+            </div>
+          </section>
           <div class="slide-preview-panel hidden" id="preview-panel"><div class="preview-heading"><h3>Pré-visualização do slide</h3><span id="preview-number"></span></div><img id="slide-preview" alt="Prévia do slide selecionado" loading="lazy"><p>O projeto é salvo antes de atualizar a prévia. Use os blocos e o tema para variar o design.</p></div>
           <div class="links" id="slides-only-links"></div>
         </section>
@@ -50,6 +66,20 @@
       <label id="dialog-label" for="dialog-input" class="hidden"></label>
       <input id="dialog-input" class="hidden" maxlength="120" autocomplete="off">
       <div class="dialog-actions"><button id="dialog-cancel" class="secondary" value="cancel" formnovalidate>Cancelar</button><button id="dialog-confirm" value="confirm">Confirmar</button></div>
+    </form>
+  </dialog>
+  <dialog id="asset-dialog" class="action-dialog" aria-labelledby="asset-dialog-title">
+    <form id="asset-form">
+      <h2 id="asset-dialog-title">Detalhes da imagem</h2>
+      <label>Título<input id="asset-title" maxlength="100"></label>
+      <label>Texto alternativo<input id="asset-alt" maxlength="200"></label>
+      <label>Etiquetas (separadas por vírgula)<input id="asset-tags" maxlength="410"></label>
+      <label>Licença<input id="asset-license" maxlength="120"></label>
+      <p id="asset-provenance"></p>
+      <div class="dialog-actions">
+        <button id="close-asset-dialog" type="button" class="secondary">Cancelar</button>
+        <button type="submit">Salvar detalhes</button>
+      </div>
     </form>
   </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

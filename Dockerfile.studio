@@ -16,11 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /opt/studio/pptx \
     && npm install --prefix /opt/studio/pptx --no-audit --no-fund pptxgenjs@4.0.0 \
     && python3 -m venv /opt/venv
-COPY studio/requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+COPY studio/requirements.txt studio/requirements-test.txt /tmp/
+RUN pip install -r /tmp/requirements.txt -r /tmp/requirements-test.txt
 COPY studio/ /opt/studio/
 COPY tests/ /opt/tests/
-RUN mkdir -p /data/voices /data/projects \
+RUN chmod -R a+rX /opt/studio /opt/tests \
+    && mkdir -p /data/voices /data/projects \
     && chown -R node:node /data
 WORKDIR /opt/studio
 EXPOSE 8787

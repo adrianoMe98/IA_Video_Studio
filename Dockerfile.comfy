@@ -34,7 +34,8 @@ RUN groupadd -g 1000 comfy && useradd -m -u 1000 -g 1000 -s /bin/bash comfy \
        /app/ComfyUI/temp /app/ComfyUI/models /app/ComfyUI/custom_nodes \
        /home/comfy/.cache/huggingface \
     && chown -R comfy:comfy /app/ComfyUI /home/comfy \
-    && chmod +x /opt/entrypoint.sh
+    && chmod a+rx /opt/entrypoint.sh \
+    && chmod a+r /opt/tools/download_models.py /opt/seed-workflows/wan21_1.3b_4gb_ui.json
 
 EXPOSE 8188
 USER 1000:1000
