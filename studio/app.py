@@ -10,6 +10,7 @@ import uuid
 from urllib import error as urlerror, request as urlrequest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated
 
@@ -619,7 +620,7 @@ async def import_document(file: UploadFile = File(...)):
         raise HTTPException(413, 'Limite de 5 MB excedido.')
     try:
         if ext == '.pdf':
-            reader = PdfReader(io.BytesIO(content))
+            reader = PdfReader(BytesIO(content))
             if len(reader.pages) > 30:
                 raise ValueError('PDF muito longo: máximo de 30 páginas para importação.')
             text = '\f'.join(p.extract_text() or '' for p in reader.pages)

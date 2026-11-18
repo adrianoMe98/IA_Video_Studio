@@ -4,6 +4,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+from cairosvg import svg2pdf
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'studio'))
@@ -41,6 +43,14 @@ class ApiTests(unittest.TestCase):
         result = self.client.post('/api/projects/import', files={'file':('aula.txt', b'Tema\nUma frase.\n\n---\n\nOutro\nOutra frase.')})
         self.assertEqual(result.status_code, 201, result.text)
         self.assertEqual(len(result.json()['scenes']), 2)
+
+    def test_import_pdf_extracts_scene_text(self):
+        pdf = svg2pdf(bytestring=b'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="80">'
+                                 b'<text x="10" y="30">Introducao ao GPON</text></svg>')
+        result = self.client.post('/api/projects/import', files={'file': ('redes.pdf', pdf, 'application/pdf')})
+        self.assertEqual(result.status_code, 201, result.text)
+        self.assertEqual(result.json()['title'], 'redes')
+        self.assertEqual(result.json()['scenes'][0]['narration'], 'Introducao ao GPON')
 
     def test_invalid_voice(self):
         sample = self.client.get('/api/sample').json()
