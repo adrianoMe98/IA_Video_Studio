@@ -1,0 +1,42 @@
+FROM pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    HF_HOME=/home/comfy/.cache/huggingface
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates git ffmpeg libgl1 libglib2.0-0 tini \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/ComfyUI
+ARG COMFYUI_REF=master
+ARG GGUF_REF=main
+RUN git clone --depth 1 https://github.com/Comfy-Org/ComfyUI.git /app/ComfyUI \
+    && if [ "$COMFYUI_REF" != "master" ]; then \
+       git -C /app/ComfyUI fetch --depth 1 origin "$COMFYUI_REF" && git -C /app/ComfyUI checkout FETCH_HEAD; \
+       fi \
+    && git clone --depth 1 https://github.com/city96/ComfyUI-GGUF.git /opt/ComfyUI-GGUF \
+    && if [ "$GGUF_REF" != "main" ]; then \
+       git -C /opt/ComfyUI-GGUF fetch --depth 1 origin "$GGUF_REF" && git -C /opt/ComfyUI-GGUF checkout FETCH_HEAD; \
+       fi
+
+RUN python -m pip install --no-cache-dir -r /app/ComfyUI/requirements.txt \
+    && python -m pip install --no-cache-dir -r /opt/ComfyUI-GGUF/requirements.txt \
+       'huggingface_hub>=0.34,<2'
+
+COPY docker/entrypoint.sh /opt/entrypoint.sh
+COPY tools/download_models.py /opt/tools/download_models.py
+COPY workflows/wan21_1.3b_4gb_ui.json /opt/seed-workflows/wan21_1.3b_4gb_ui.json
+RUN groupadd -g 1000 comfy && useradd -m -u 1000 -g 1000 -s /bin/bash comfy \
+    && mkdir -p /app/ComfyUI/user /app/ComfyUI/input /app/ComfyUI/output \
+       /app/ComfyUI/temp /app/ComfyUI/models /app/ComfyUI/custom_nodes \
+       /home/comfy/.cache/huggingface \
+    && chown -R comfy:comfy /app/ComfyUI /home/comfy \
+    && chmod +x /opt/entrypoint.sh
+
+EXPOSE 8188
+USER 1000:1000
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/entrypoint.sh"]
+CMD ["python", "-u", "main.py", "--listen", "0.0.0.0", "--port", "8188", "--lowvram", "--cpu-vae", "--force-fp16"]

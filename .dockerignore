@@ -1,0 +1,8 @@
+.git
+.env
+studio-data/
+data/
+__pycache__/
+*.pyc
+*.zip
+.pytest_cache/

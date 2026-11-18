@@ -1,0 +1,12 @@
+# GPON: visão geral
+Uma rede GPON utiliza a fibra óptica para conectar uma OLT a vários equipamentos de assinantes. Em redes ópticas passivas, os divisores ópticos distribuem o sinal sem alimentação elétrica entre a central e o assinante.
+
+---
+
+# Principais componentes
+A OLT fica na infraestrutura da operadora. Os splitters dividem a potência óptica e permitem atender vários clientes. A ONT fica no ponto final de acesso e entrega a conexão ao cliente.
+
+---
+
+# Boas práticas
+Ao planejar uma rede óptica é importante calcular o orçamento de potência, registrar as caixas de atendimento, identificar cabos e manter o cadastro da rede atualizado.

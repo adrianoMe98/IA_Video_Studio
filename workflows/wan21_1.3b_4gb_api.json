@@ -1,0 +1,136 @@
+{
+  "37": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "Wan2.1-T2V-1.3B-Q4_K_S.gguf"
+    }
+  },
+  "38": {
+    "class_type": "CLIPLoaderGGUF",
+    "inputs": {
+      "clip_name": "umt5-xxl-encoder-Q3_K_S.gguf",
+      "type": "wan"
+    }
+  },
+  "39": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    }
+  },
+  "40": {
+    "class_type": "EmptyHunyuanLatentVideo",
+    "inputs": {
+      "width": 320,
+      "height": 192,
+      "length": 17,
+      "batch_size": 1
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "A cinematic static camera shot of a tiny red toy car driving slowly across a clean wooden table, soft studio lighting, smooth motion, realistic materials.",
+      "clip": [
+        "38",
+        0
+      ]
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "low quality, distorted, blurry, flicker, text, subtitles, watermark, deformed, artifacts",
+      "clip": [
+        "38",
+        0
+      ]
+    }
+  },
+  "48": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "37",
+        0
+      ],
+      "shift": 8
+    }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "48",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "40",
+        0
+      ],
+      "seed": 123456789,
+      "steps": 12,
+      "cfg": 6.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "39",
+        0
+      ]
+    }
+  },
+  "49": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "fps": 8,
+      "images": [
+        "8",
+        0
+      ]
+    }
+  },
+  "50": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "filename_prefix": "wan21/gtx1650",
+      "format": "auto",
+      "format.codec": "auto",
+      "video": [
+        "49",
+        0
+      ]
+    }
+  },
+  "51": {
+    "class_type": "SaveAnimatedWEBP",
+    "inputs": {
+      "filename_prefix": "wan21/gtx1650",
+      "fps": 8,
+      "lossless": false,
+      "quality": 78,
+      "method": "default",
+      "images": [
+        "8",
+        0
+      ]
+    }
+  }
+}

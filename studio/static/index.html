@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a1122">
+  <title>IA Video Studio | Videoaulas</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topbar"><div class="brand"><div class="mark">▶</div><div><strong>IA Video Studio</strong><span>v1.3 · Slide Studio + Videoaulas</span></div></div><div class="right"><span class="pill" id="health">Iniciando...</span><span class="chip">100% local</span></div></header>
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="heading"><h2>Projetos</h2><button id="new" class="small">+ Criar</button></div>
+      <label class="search-label" for="project-search">Pesquisar projetos<input id="project-search" type="search" maxlength="120" placeholder="Buscar por título ou descrição..."></label>
+      <div class="project-tabs" role="group" aria-label="Exibir projetos"><button id="tab-active" class="small active" aria-pressed="true">Ativos <span id="active-count"></span></button><button id="tab-trash" class="small" aria-pressed="false">Lixeira <span id="trash-count"></span></button></div>
+      <div id="projects" class="project-list"></div>
+      <div class="sidebar-footer"><label class="upload-label" for="upload">↥ Importar PDF / Markdown / TXT</label><input type="file" id="upload" accept=".pdf,.md,.txt"><p>O conteúdo importado vira um rascunho. Revise cada cena.</p></div>
+    </aside>
+    <section class="workspace">
+      <div class="welcome" id="welcome"><div class="hero-tag">PRODUÇÃO LOCAL</div><h1>Transforme conhecimento em videoaulas.</h1><p>Crie slides, adicione uma narração em português, escolha a resolução e exporte seus vídeos com legendas — tudo no seu próprio computador.</p><button id="welcome-new">Criar primeira videoaula</button></div>
+      <div id="editor" class="editor hidden">
+        <div class="section-label">EDITOR DE VIDEOAULAS + SLIDE STUDIO</div>
+        <div class="formrow"><label>Título do projeto<input id="title" maxlength="120" placeholder="Ex.: Curso completo de GPON"></label><label>Descrição<input id="description" maxlength="400" placeholder="Uma breve descrição"></label></div>
+        <div class="formrow three"><label>Voz em português<select id="voice"><option value="faber">Faber · PT-BR (média)</option><option value="edresson">Edresson · PT-BR (leve)</option></select></label><label>Resolução<select id="quality"><option value="720">HD 720p · Mais rápido</option><option value="1080">Full HD 1080p</option></select></label><label class="check"><input type="checkbox" id="burn"> Gravar legenda na imagem</label></div>
+        <section class="slide-studio-config" aria-label="Slide Studio">
+          <div class="slide-studio-banner"><div><strong>✦ Slide Studio</strong><p>Modelos profissionais, blocos inteligentes, imagens e apresentações editáveis.</p></div><span class="chip">v1.3</span></div>
+          <div class="slide-studio-actions">
+            <label>Tema dos slides<select id="slide-theme"><option value="tech_blue">Tech Blue · Tecnologia</option><option value="corporate_clean">Corporate Clean · Corporativo</option><option value="creative_course">Creative Course · Criativo</option><option value="minimal_focus">Minimal Focus · Minimalista</option></select></label>
+            <button id="auto-layout" class="secondary" type="button">✦ Organizar slides</button>
+            <button id="export-slides" type="button">Exportar PPTX + PDF</button>
+          </div>
+          <div class="media-upload"><label for="image-upload" class="upload-label">+ Adicionar imagem à biblioteca (PNG / JPG / WebP)</label><input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp"><p>As imagens ficam armazenadas no projeto; não são enviadas a serviços externos.</p></div>
+          <div id="asset-gallery" class="asset-gallery"></div>
+          <div class="slide-preview-panel hidden" id="preview-panel"><div class="preview-heading"><h3>Pré-visualização do slide</h3><span id="preview-number"></span></div><img id="slide-preview" alt="Prévia do slide selecionado" loading="lazy"><p>O projeto é salvo antes de atualizar a prévia. Use os blocos e o tema para variar o design.</p></div>
+          <div class="links" id="slides-only-links"></div>
+        </section>
+        <div class="section-heading"><div><h2>Cenas e narrações</h2><p>Um slide por cena. As legendas seguem as frases sintetizadas.</p></div><div class="rowbuttons"><button id="generate" class="small secondary">✦ Sugerir cenas com IA</button><button id="add" class="small secondary">+ Adicionar cena</button></div></div>
+        <div id="scenes" class="scenes"></div>
+        <div class="actions"><button id="save" class="secondary">Salvar projeto</button><button id="render">▶ Gerar videoaula</button></div>
+        <div id="status" class="status hidden"></div>
+        <div id="output" class="output hidden"><h2>Arquivos exportados</h2><div id="links" class="links"></div><video id="video" controls preload="metadata"></video><p>Os arquivos também ficam em <code>studio-data/projects/ID/exports/</code>.</p></div>
+      </div>
+    </section>
+  </main>
+  <dialog id="action-dialog" class="action-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-desc">
+    <form method="dialog" id="action-form">
+      <h2 id="dialog-title"></h2><p id="dialog-desc"></p>
+      <label id="dialog-label" for="dialog-input" class="hidden"></label>
+      <input id="dialog-input" class="hidden" maxlength="120" autocomplete="off">
+      <div class="dialog-actions"><button id="dialog-cancel" class="secondary" value="cancel" formnovalidate>Cancelar</button><button id="dialog-confirm" value="confirm">Confirmar</button></div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Estúdio CPU-first: NÃO precisa de NVIDIA Container Toolkit.
+FROM node:22-bookworm-slim
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PUPPETEER_SKIP_DOWNLOAD=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:$PATH \
+    NODE_PATH=/opt/studio/pptx/node_modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-venv python3-pip ffmpeg \
+    libcairo2 libffi8 \
+    fonts-dejavu-core fonts-liberation fonts-noto-core \
+    ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/studio/pptx \
+    && npm install --prefix /opt/studio/pptx --no-audit --no-fund pptxgenjs@4.0.0 \
+    && python3 -m venv /opt/venv
+COPY studio/requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
+COPY studio/ /opt/studio/
+COPY tests/ /opt/tests/
+RUN mkdir -p /data/voices /data/projects \
+    && chown -R node:node /data
+WORKDIR /opt/studio
+EXPOSE 8787
+USER node
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8787", "--workers", "1"]

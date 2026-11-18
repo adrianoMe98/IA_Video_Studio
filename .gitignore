@@ -1,0 +1,32 @@
+.env
+studio-data/*
+!studio-data/.gitkeep
+data/*
+!data/.gitkeep
+__pycache__/
+.pytest_cache/
+# Dados persistentes
+studio-data/
+data/
+
+# Configurações locais
+.env
+.env.*
+!.env.example
+
+# Modelos de IA
+*.onnx
+*.onnx.json
+*.gguf
+*.safetensors
+*.ckpt
+
+# Dependências e caches
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Arquivos temporários
+*.log
+*.tmp

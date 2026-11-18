@@ -1,0 +1,364 @@
+/* IA Video Studio — interface sem dependências externas */
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (text) => String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let selected = null;
+let lastStatus = null;
+let polling = null;
+let viewMode = 'active';
+let activeProjects = [];
+let trashedProjects = [];
+let assets = [];
+const layouts = {auto:'Automático',hero_cover:'Capa',learning_objectives:'Objetivos',concept_explainer:'Conceito',two_column_explanation:'Texto + imagem',comparison_table:'Comparação',step_by_step:'Passo a passo',diagram_slide:'Topologia / diagrama',practical_example:'Exemplo prático',quiz_slide:'Quiz / exercício',summary_slide:'Resumo'};
+const files = ['video.mp4','video_legendas.mp4','slides.pdf','slides.pptx','slides.md','legendas.srt'];
+
+function toast(text) {
+  $('toast').textContent = text;
+  $('toast').classList.add('show');
+  setTimeout(() => $('toast').classList.remove('show'), 4500);
+}
+async function request(url, opts = {}) {
+  const response = await fetch(url, opts);
+  let json;
+  try { json = await response.json(); } catch { json = null; }
+  if (!response.ok) throw new Error(json?.detail || `HTTP ${response.status}`);
+  return json;
+}
+function jsonOpt(method, data) {
+  return {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)};
+}
+function renderProjectList() {
+  const q = $('project-search').value.trim().toLocaleLowerCase('pt-BR');
+  const values = viewMode === 'active' ? activeProjects : trashedProjects;
+  const filtered = values.filter(p => `${p.title} ${p.description || ''}`.toLocaleLowerCase('pt-BR').includes(q));
+  $('active-count').textContent = `(${activeProjects.length})`;
+  $('trash-count').textContent = `(${trashedProjects.length})`;
+  $('tab-active').classList.toggle('active', viewMode === 'active');
+  $('tab-trash').classList.toggle('active', viewMode === 'trash');
+  $('tab-active').setAttribute('aria-pressed', String(viewMode === 'active'));
+  $('tab-trash').setAttribute('aria-pressed', String(viewMode === 'trash'));
+  $('projects').innerHTML = filtered.length ? filtered.map(p => {
+    const detail = `${p.scenes} cena(s) · ${p.deleted_at?.slice(0, 10) || p.updated_at?.slice(0, 10) || ''}`;
+    return `<div class="project-entry ${p.id === selected && viewMode === 'active' ? 'active' : ''}">
+      <button type="button" class="project-card" data-act="${viewMode === 'active' ? 'open' : 'none'}" data-project="${esc(p.id)}" ${viewMode === 'trash' ? 'disabled' : ''}><b>${esc(p.title)}</b><small>${esc(detail)}</small></button>
+      <div class="project-tools">${viewMode === 'active' ? `
+        <button type="button" data-act="rename" data-project="${esc(p.id)}" title="Renomear projeto" aria-label="Renomear ${esc(p.title)}">Renomear</button>
+        <button type="button" data-act="duplicate" data-project="${esc(p.id)}" title="Duplicar projeto" aria-label="Duplicar ${esc(p.title)}">Duplicar</button>
+        <button type="button" class="danger" data-act="trash" data-project="${esc(p.id)}" title="Enviar para lixeira" aria-label="Excluir ${esc(p.title)}">Excluir</button>` : `
+        <button type="button" data-act="restore" data-project="${esc(p.id)}" aria-label="Restaurar ${esc(p.title)}">Restaurar</button>
+        <button type="button" class="danger" data-act="erase" data-project="${esc(p.id)}" aria-label="Excluir definitivamente ${esc(p.title)}">Apagar definitivamente</button>`}
+      </div>
+    </div>`;
+  }).join('') : `<p class="empty-list">${q ? 'Nenhum projeto corresponde à pesquisa.' : viewMode === 'trash' ? 'A lixeira está vazia.' : 'Nenhuma videoaula ainda.'}</p>`;
+}
+async function refreshList() {
+  [activeProjects, trashedProjects] = await Promise.all([request('/api/projects'), request('/api/trash')]);
+  renderProjectList();
+}
+function projectName(id) {
+  return [...activeProjects, ...trashedProjects].find(p => p.id === id)?.title || 'Projeto';
+}
+function askDialog({title, description, label = '', value = '', confirmText = 'Confirmar', danger = false}) {
+  return new Promise(resolve => {
+    const dialog = $('action-dialog');
+    $('dialog-title').textContent = title;
+    $('dialog-desc').textContent = description;
+    $('dialog-confirm').textContent = confirmText;
+    $('dialog-confirm').classList.toggle('danger-button', danger);
+    const input = $('dialog-input');
+    const showInput = Boolean(label);
+    input.classList.toggle('hidden', !showInput);
+    $('dialog-label').classList.toggle('hidden', !showInput);
+    $('dialog-label').textContent = label;
+    input.value = value;
+    input.required = showInput;
+    const onClose = () => {
+      dialog.removeEventListener('close', onClose);
+      const accepted = dialog.returnValue === 'confirm';
+      resolve(accepted ? (showInput ? input.value.trim() : true) : null);
+    };
+    dialog.addEventListener('close', onClose);
+    dialog.returnValue = 'cancel';
+    dialog.showModal();
+    if (showInput) input.focus();
+  });
+}
+function clearEditor() {
+  selected = null;
+  assets = [];
+  $('preview-panel').classList.add('hidden');
+  lastStatus = null;
+  $('editor').classList.add('hidden');
+  $('welcome').classList.remove('hidden');
+  $('video').pause();
+  $('video').removeAttribute('src');
+  $('video').load();
+}
+async function actionOnProject(action, id) {
+  if (!id || !/^[0-9a-f]{12}$/.test(id)) return;
+  if (action === 'open') return loadProject(id);
+  const title = projectName(id);
+  if (action === 'rename') {
+    const name = await askDialog({title:'Renomear projeto', description:'O novo nome será atualizado no projeto salvo.', label:'Novo nome', value:title, confirmText:'Salvar nome'});
+    if (!name) return;
+    const updated = await request(`/api/projects/${id}/rename`, jsonOpt('PATCH', {title:name}));
+    if (selected === id) $('title').value = updated.title;
+    toast('Nome atualizado.');
+  } else if (action === 'duplicate') {
+    const copy = await request(`/api/projects/${id}/duplicate`, {method:'POST'});
+    viewMode = 'active';
+    await loadProject(copy.id);
+    toast('Cópia criada. Renderize a cópia para gerar novos arquivos.');
+    return;
+  } else if (action === 'trash') {
+    const ok = await askDialog({title:'Mover para a lixeira?', description:`O projeto “${title}” e seus arquivos serão preservados na lixeira e poderão ser restaurados.`, confirmText:'Mover para lixeira', danger:true});
+    if (!ok) return;
+    await request(`/api/projects/${id}`, {method:'DELETE'});
+    if (selected === id) clearEditor();
+    toast('Projeto movido para a lixeira.');
+  } else if (action === 'restore') {
+    await request(`/api/trash/${id}/restore`, {method:'POST'});
+    viewMode = 'active';
+    toast('Projeto restaurado com seus arquivos.');
+  } else if (action === 'erase') {
+    const answer = await askDialog({title:'Exclusão definitiva', description:`Você está prestes a apagar “${title}”, seus slides, narrações e vídeos exportados. Essa ação não pode ser desfeita.`, label:'Digite EXCLUIR para confirmar', confirmText:'Apagar definitivamente', danger:true});
+    if (answer === null) return;
+    if (answer !== 'EXCLUIR') {toast('Exclusão cancelada: digite EXCLUIR exatamente.');return;}
+    await request(`/api/trash/${id}`, jsonOpt('DELETE', {confirm:'EXCLUIR'}));
+    toast('Projeto apagado definitivamente.');
+  } else return;
+  await refreshList();
+}
+
+function sceneHtml(scene, i) {
+  const opts = Object.entries(layouts).map(([id,name]) => `<option value="${id}" ${scene.layout===id?'selected':''}>${esc(name)}</option>`).join('');
+  const media = `<option value="">Sem imagem</option>`+assets.map(a=>`<option value="${esc(a.id)}" ${scene.image===a.id?'selected':''}>${esc(a.id.slice(0,9))} · Imagem</option>`).join('');
+  return `<div class="scene"><div class="scenehead"><span>CENA ${String(i+1).padStart(2,'0')}</span><div class="rowbuttons"><button type="button" class="preview-button" data-preview="${i}">◧ Prévia</button><button data-remove="${i}" aria-label="Excluir cena ${i+1}">Excluir</button></div></div>
+    <div class="scene-meta"><label>Bloco visual<select class="scene-layout">${opts}</select></label><label>Imagem da biblioteca<select class="scene-image">${media}</select></label></div>
+    <div class="scenebody"><label class="title">Título do slide<input class="stitle" maxlength="120" value="${esc(scene.title)}" placeholder="Título da cena"></label>
+    <label>Tópicos do slide (um por linha)<textarea class="bullets" placeholder="Ponto 1&#10;Ponto 2">${esc((scene.bullets || []).join('\n'))}</textarea></label>
+    <label>Texto narrado em português<textarea class="narration" placeholder="Digite a explicação que será narrada...">${esc(scene.narration)}</textarea></label></div></div>`;
+}
+function renderScenes(scenes) {
+  $('scenes').innerHTML = scenes.map(sceneHtml).join('');
+  $('scenes').querySelectorAll('[data-preview]').forEach(button => button.addEventListener('click', () => previewSlide(Number(button.dataset.preview))));
+  $('scenes').querySelectorAll('[data-remove]').forEach(button => button.addEventListener('click', () => {
+    const all = collectScenes();
+    if (all.length <= 1) { toast('Mantenha ao menos uma cena.'); return; }
+    all.splice(Number(button.dataset.remove), 1);
+    renderScenes(all);
+  }));
+}
+function collectScenes() {
+  return Array.from($('scenes').querySelectorAll('.scene')).map(box => ({
+    title: box.querySelector('.stitle').value.trim(),
+    bullets: box.querySelector('.bullets').value.split(/\n/).map(v => v.trim()).filter(Boolean),
+    narration: box.querySelector('.narration').value.trim(),
+    layout: box.querySelector('.scene-layout').value,
+    image: box.querySelector('.scene-image').value,
+  }));
+}
+function payload() {
+  return {
+    title: $('title').value.trim(),
+    description: $('description').value.trim(),
+    voice: $('voice').value,
+    quality: $('quality').value,
+    burn_subtitles: $('burn').checked,
+    slide_theme: $('slide-theme').value,
+    scenes: collectScenes(),
+  };
+}
+function populate(p) {
+  $('welcome').classList.add('hidden');
+  $('editor').classList.remove('hidden');
+  $('title').value = p.title || '';
+  $('description').value = p.description || '';
+  $('voice').value = p.voice || 'faber';
+  $('quality').value = p.quality || '720';
+  $('burn').checked = Boolean(p.burn_subtitles);
+  $('slide-theme').value = p.slide_theme || 'tech_blue';
+  renderScenes(p.scenes || []);
+  $('preview-panel').classList.add('hidden');
+  $('slides-only-links').innerHTML = '';
+  $('output').classList.add('hidden');
+  $('status').classList.add('hidden');
+  $('video').removeAttribute('src');
+}
+async function loadProject(pid) {
+  try {
+    const p = await request(`/api/projects/${pid}`);
+    selected = pid;
+    viewMode = 'active';
+    assets = await request(`/api/projects/${pid}/assets`);
+    populate(p);
+    renderAssetGallery();
+    await refreshList();
+    await refreshJob();
+  } catch (err) { toast(err.message); }
+}
+async function newProject() {
+  try {
+    const sample = await request('/api/sample');
+    sample.title = 'Minha primeira videoaula';
+    const project = await request('/api/projects', jsonOpt('POST', sample));
+    await loadProject(project.id);
+    toast('Projeto de exemplo criado. Edite as cenas antes de gerar.');
+  } catch (err) { toast(err.message); }
+}
+async function save() {
+  if (!selected) throw new Error('Crie ou selecione um projeto primeiro.');
+  const data = payload();
+  if (!data.title || !data.scenes.every(s => s.title && s.narration)) {
+    throw new Error('Preencha o título do projeto e o título/narração de cada cena.');
+  }
+  await request(`/api/projects/${selected}`, jsonOpt('PUT', data));
+  await refreshList();
+}
+async function saveClick() {
+  try { await save(); toast('Projeto salvo.'); } catch (err) { toast(err.message); }
+}
+async function startRender() {
+  try {
+    await save();
+    $('render').disabled = true;
+    await request(`/api/projects/${selected}/render`, {method:'POST'});
+    toast('Renderização adicionada à fila.');
+    await refreshJob();
+  } catch (err) { $('render').disabled = false; toast(err.message); }
+}
+async function refreshJob() {
+  if (!selected) return;
+  const id = selected;
+  try {
+    const job = await request(`/api/projects/${id}/job`);
+    if (id !== selected) return;
+    lastStatus = job;
+    if (job.status === 'none') { $('status').classList.add('hidden'); $('render').disabled=false; return; }
+    const running = job.status === 'running' || job.status === 'queued';
+    $('render').disabled = running;
+    $('status').classList.remove('hidden');
+    $('status').classList.toggle('error', job.status==='error');
+    $('status').innerHTML = `<strong>${job.status==='done'?'✓ Concluído':job.status==='error'?'Falha':running?'Processando...':'Status'}</strong><div>${esc(job.message || '')}</div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(job.percent||0)))}%"></i></div>`;
+    if (job.status==='done') showFiles(job.result?.video || 'video.mp4');
+    if (job.status==='error') $('output').classList.add('hidden');
+  } catch (err) { toast(err.message); }
+}
+function showFiles(mainVideo) {
+  $('output').classList.remove('hidden');
+  const names = files.filter(name => name!=='video_legendas.mp4' || mainVideo==='video_legendas.mp4');
+  $('links').innerHTML = names.map(name => `<a href="/api/projects/${selected}/files/${name}" target="_blank" rel="noopener" download>${esc(name)}</a>`).join('');
+  const url = `/api/projects/${selected}/files/${mainVideo}`;
+  if ($('video').getAttribute('src') !== url) $('video').src = url;
+}
+async function upload() {
+  const f = $('upload').files?.[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    toast('Importando texto e gerando rascunho...');
+    const project = await request('/api/projects/import', {method:'POST', body:fd});
+    await loadProject(project.id);
+    toast('Importação concluída. Confira os tópicos e a narração!');
+  } catch (err) { toast(err.message); }
+  $('upload').value = '';
+}
+async function checkHealth() {
+  try {
+    const h = await request('/api/health');
+    const installed = Object.values(h.voices).filter(Boolean).length;
+    $('health').textContent = `Serviço ativo · ${installed}/2 vozes`;
+    if (!installed) toast('Baixe uma voz para renderizar: ./scripts/baixar-voz.sh');
+  } catch { $('health').textContent='Serviço indisponível'; }
+}
+$('new').addEventListener('click', newProject);
+$('project-search').addEventListener('input', renderProjectList);
+$('tab-active').addEventListener('click', () => {viewMode = 'active';renderProjectList();});
+$('tab-trash').addEventListener('click', () => {viewMode = 'trash';renderProjectList();});
+$('projects').addEventListener('click', async event => {
+  const button = event.target.closest('button[data-act]');
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  try { await actionOnProject(button.dataset.act, button.dataset.project); }
+  catch (err) { toast(err.message); }
+  finally { button.disabled = false; }
+});
+$('welcome-new').addEventListener('click', newProject);
+$('add').addEventListener('click', () => {
+  const scenes = collectScenes();
+  scenes.push({title:'Nova cena', bullets:['Ponto principal'], narration:'Escreva aqui a narração desta cena.', layout:'auto', image:''});
+  renderScenes(scenes);
+  $('scenes').lastElementChild.scrollIntoView({behavior:'smooth',block:'center'});
+});
+$('save').addEventListener('click', saveClick);
+$('render').addEventListener('click', startRender);
+$('upload').addEventListener('change', upload);
+Promise.all([refreshList(),checkHealth()]).catch(err => toast(err.message));
+polling = setInterval(() => { if(selected) refreshJob(); }, 2400);
+$('generate').addEventListener('click', async () => {
+  if (!selected) return toast('Selecione um projeto.');
+  $('generate').disabled = true;
+  $('generate').textContent = 'IA pensando...';
+  try {
+    const draft = await request(`/api/projects/${selected}/suggest`, jsonOpt('POST', payload()));
+    renderScenes(draft.scenes);
+    toast('Cenas sugeridas pela IA. Revise os fatos e clique Salvar projeto.');
+  } catch (err) {
+    toast('Falha na IA local: ' + err.message);
+  } finally {
+    $('generate').disabled = false;
+    $('generate').textContent = '✦ Sugerir cenas com IA';
+  }
+});
+
+// Slide Studio v1.3 — recursos visuais e exportações de slides sem voz.
+function renderAssetGallery() {
+  $('asset-gallery').innerHTML = assets.length ? assets.map(a=>`<img src="/api/projects/${selected}/assets/${encodeURIComponent(a.id)}" alt="Imagem da biblioteca" title="${esc(a.id)}" loading="lazy">`).join('') : '<small>Biblioteca vazia. Carregue uma imagem para ilustrar a aula.</small>';
+}
+async function previewSlide(index) {
+  try {
+    await save();
+    $('preview-panel').classList.remove('hidden');
+    $('preview-number').textContent = `Slide ${index+1}`;
+    $('slide-preview').src = `/api/projects/${selected}/slides/${index}/preview?ts=${Date.now()}`;
+    $('preview-panel').scrollIntoView({behavior:'smooth',block:'center'});
+  } catch(err) {toast(err.message);}
+}
+async function uploadImage() {
+  const f = $('image-upload').files?.[0];
+  if (!selected || !f) return;
+  if (f.size > 6*1024*1024) return toast('Imagem muito grande. Máximo 6 MB.');
+  try {
+    const current = collectScenes();
+    const fd = new FormData();fd.append('file', f);
+    const result = await request(`/api/projects/${selected}/assets`,{method:'POST',body:fd});
+    assets = await request(`/api/projects/${selected}/assets`);
+    renderScenes(current);
+    renderAssetGallery();
+    toast('Imagem recebida. Selecione-a no bloco da cena desejada.');
+  } catch(err) {toast(err.message);}
+  finally {$('image-upload').value='';}
+}
+async function autoLayout() {
+  try {
+    await save();
+    const p = await request(`/api/projects/${selected}/slides/auto-layout`,{method:'POST'});
+    renderScenes(p.scenes);
+    toast('Blocos organizados automaticamente. Revise o resultado.');
+  } catch(err) {toast(err.message);}
+}
+async function exportSlides() {
+  if (!selected) return toast('Selecione um projeto.');
+  $('export-slides').disabled = true;
+  $('export-slides').textContent='Exportando...';
+  try {
+    await save();
+    const result = await request(`/api/projects/${selected}/slides/export`,{method:'POST'});
+    $('slides-only-links').innerHTML = result.files.map(name=>`<a href="/api/projects/${selected}/files/${name}" target="_blank" rel="noopener" download>${esc(name)} ↓</a>`).join('');
+    toast(`Apresentação com ${result.slides} slides pronta.`);
+  } catch(err) {toast(err.message);}
+  finally {$('export-slides').disabled=false;$('export-slides').textContent='Exportar PPTX + PDF';}
+}
+$('image-upload').addEventListener('change', uploadImage);
+$('auto-layout').addEventListener('click', autoLayout);
+$('export-slides').addEventListener('click', exportSlides);

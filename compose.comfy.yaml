@@ -1,0 +1,55 @@
+services:
+  comfyui:
+    profiles: ["wan"]
+    image: ia-video-comfyui:local
+    build:
+      context: .
+      dockerfile: Dockerfile.comfy
+      args:
+        COMFYUI_REF: ${COMFYUI_REF:-master}
+        GGUF_REF: ${GGUF_REF:-main}
+    container_name: ia-video-comfyui
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    gpus: all
+    shm_size: "1gb"
+    mem_limit: ${MEMORY_LIMIT:-13g}
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${COMFY_PORT:-8188}:8188"
+    environment:
+      HF_HOME: /home/comfy/.cache/huggingface
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+    volumes:
+      - ./data/models:/app/ComfyUI/models
+      - ./data/custom_nodes:/app/ComfyUI/custom_nodes
+      - ./data/user:/app/ComfyUI/user
+      - ./data/input:/app/ComfyUI/input
+      - ./data/output:/app/ComfyUI/output
+      - ./data/temp:/app/ComfyUI/temp
+      - ./data/cache:/home/comfy/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8188/system_stats', timeout=4)"]
+      interval: 30s
+      timeout: 8s
+      start_period: 120s
+      retries: 5
+  model-download:
+    profiles: ["wan-tools"]
+    image: ia-video-comfyui:local
+    build:
+      context: .
+      dockerfile: Dockerfile.comfy
+      args:
+        COMFYUI_REF: ${COMFYUI_REF:-master}
+        GGUF_REF: ${GGUF_REF:-main}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    entrypoint: ["python", "/opt/tools/download_models.py"]
+    command: ["--profile", "gtx1650"]
+    environment:
+      HF_HOME: /home/comfy/.cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./data/models:/app/ComfyUI/models
+      - ./data/cache:/home/comfy/.cache/huggingface
