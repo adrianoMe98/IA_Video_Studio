@@ -31,6 +31,8 @@ O commit `98fb989` em `main` identifica a versão 1.3.0. O host-alvo é Debian S
 
 `scripts/validar.sh` também verifica sintaxe, arquivos Compose e consistência entre os dois JSONs Wan. A suíte não cobre síntese com voz real, montagem MP4 ponta a ponta, inferência Wan em GPU nem navegação em navegador. Essas verificações fazem parte da aceitação no equipamento-alvo.
 
+A imagem da v1.3 copia `tests/`, mas `studio/requirements.txt` não inclui a dependência HTTP do `TestClient`. Para reproduzir a suíte, instale `httpx` em um ambiente de teste separado. Na v1.4, explicite as dependências de teste para tornar o comando documentado reproduzível na imagem.
+
 ## 1. Imagens educativas com IA, sob demanda
 
 1. Implementar um conector para ComfyUI local, ativado explicitamente, com endpoint definido pelo operador e inacessível aos campos da cena. Prototipar um workflow fixo e versionado de imagem estática com um checkpoint leve da família SD 1.5, com licença e revisão registradas. Conservar o workflow Wan atual. Manter downloads de modelos em comando explícito, em perfil opcional, fora do build do Studio.
