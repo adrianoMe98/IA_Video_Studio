@@ -7,7 +7,7 @@ import re
 import shutil
 import threading
 import uuid
-from urllib import error as urlerror, request as urlrequest
+from urllib.error import URLError
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from io import BytesIO
@@ -25,6 +25,7 @@ import image_generation
 from core import VOICES, draft_from_text, export_project
 from diagrams import Diagram
 from media import MAX_UPLOAD, add_asset, asset_info, asset_path, normalize_image
+from script_suggestion import MIN_TARGET_RATIO, WORDS_PER_MINUTE, SceneDraft, suggest_script, word_count
 from slide_studio import LAYOUTS, THEMES, as_svg, build_slide, render_slides, suggest_layout
 
 BASE = Path(os.environ.get('STUDIO_DATA', '/data'))
@@ -66,13 +67,10 @@ class ConfirmRemoval(BaseModel):
     confirm: str
 
 
-class Scene(BaseModel):
+class Scene(SceneDraft):
     layout: str = 'auto'
     image: str = ''
     diagram: Diagram | None = None
-    title: str = Field(min_length=1, max_length=120)
-    bullets: list[str] = Field(default_factory=list, max_length=8)
-    narration: str = Field(min_length=1, max_length=4000)
 
 
 class Project(BaseModel):
@@ -649,40 +647,27 @@ def run_render(pid: str, project: dict) -> None:
 
 
 @app.post('/api/projects/{pid}/suggest')
-def suggest(pid: str, project: Project):
-    """Sugestão facultativa de roteiro pelo Ollama local, nunca publicada sem revisão."""
-    p = clean_project(project, directory(pid))
-    lines = [f'TEMA: {p["title"]}', f'CONTEXTO: {p["description"]}']
-    for slide in p['scenes'][:8]:
-        lines.append(f'- {slide["title"]}: {slide["narration"][:450]}')
-    prompt = (
-        'Você cria roteiros para videoaulas técnicas em português do Brasil. '
-        'Use o conteúdo fornecido como referência, sem inventar normas, especificações, equipamentos ou comandos. '
-        'Retorne APENAS um JSON com propriedade "scenes": lista de 3 a 5 itens. '
-        'Cada item deve conter "title" (título curto), "bullets" (2 a 4 tópicos curtos) '
-        'e "narration" (3 a 5 frases didáticas em português). '
-        'Caso faltem fatos, mantenha explicações introdutórias genéricas. '
-        'Os textos serão revisados por um especialista.\n\n' + '\n'.join(lines)
-    )
-    payload = json.dumps({
-        'model': os.environ.get('OLLAMA_MODEL', 'qwen2.5:1.5b'),
-        'prompt': prompt, 'stream': False, 'format': 'json', 'keep_alive': 0,
-        'options': {'temperature': 0.3, 'num_predict': 1600, 'num_ctx': 4096},
-    }).encode('utf-8')
+def suggest(pid: str, project: Project, duration_minutes: int = Query(default=3, ge=1, le=5)):
+    """Sugestão facultativa de roteiro pelo Ollama local."""
+    data = clean_project(project, directory(pid))
+    model = os.environ.get('OLLAMA_MODEL', 'qwen2.5:1.5b')
     url = os.environ.get('OLLAMA_URL', 'http://ollama:11434').rstrip('/') + '/api/generate'
     try:
-        req = urlrequest.Request(url, payload, headers={'Content-Type':'application/json'}, method='POST')
-        with urlrequest.urlopen(req, timeout=240) as resp:
-            result = json.loads(resp.read(1_000_000))
-        suggestion = json.loads(result['response'])
-        scenes = [Scene.model_validate(item).model_dump() for item in suggestion.get('scenes', [])[:6]]
-        if not scenes:
-            raise ValueError('O modelo não retornou cenas válidas.')
-        return {'scenes': scenes, 'model': os.environ.get('OLLAMA_MODEL', 'qwen2.5:1.5b')}
-    except (urlerror.URLError, TimeoutError) as exc:
+        draft = suggest_script(data, duration_minutes, model, url)
+    except TimeoutError as exc:
+        raise HTTPException(503, 'O Ollama demorou para responder. Tente uma duração menor.') from exc
+    except URLError as exc:
         raise HTTPException(503, 'Ollama indisponível. Use ./scripts/iniciar-roteiro-ia.sh para ativar.') from exc
-    except (ValueError, KeyError, TypeError) as exc:
-        raise HTTPException(422, 'Não foi possível interpretar as sugestões. Tente novamente.') from exc
+    except ValueError as exc:
+        raise HTTPException(422, 'O modelo não retornou cenas válidas. Revise o material e tente novamente.') from exc
+    words = word_count(draft)
+    seconds = round(words * 60 / WORDS_PER_MINUTE)
+    target = duration_minutes * 60
+    return {
+        'scenes': [Scene(**scene.model_dump()).model_dump() for scene in draft],
+        'model': model, 'word_count': words, 'estimated_seconds': seconds,
+        'target_seconds': target, 'below_target': seconds < target * MIN_TARGET_RATIO,
+    }
 
 
 @app.post('/api/projects/{pid}/render', status_code=202)

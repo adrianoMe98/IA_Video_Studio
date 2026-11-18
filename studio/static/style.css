@@ -57,3 +57,8 @@
 .diagram-source summary{cursor:pointer}
 .diagram-source label,#asset-form label{display:block;margin-top:9px}
 .diagram-source textarea{font-family:monospace}
+
+.script-heading{flex-wrap:wrap}
+.script-heading .rowbuttons{flex-wrap:wrap;align-items:center}
+.script-duration{display:flex;align-items:center;gap:8px;font-size:12px;color:#a1b5cf}
+.script-duration select{width:auto;margin:0;padding:6px 8px}

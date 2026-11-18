@@ -111,7 +111,7 @@ Há um exemplo de três slides em `examples/demo-gpon/`, com os arquivos `export
 - Exportação **H.264/AAC, 720p ou 1080p**, com arquivo SRT e legendas selecionáveis; queima de legendas opcional.
 - Duração depende do roteiro da narração, sem limite artificial de cinco segundos por cena; renderização longa pode exigir muito tempo e espaço no notebook.
 - Importação PDF (texto extraído), Markdown e TXT para rascunho; não interpreta diagramas, nem aplica OCR. **Revise o material técnico**.
-- Sugestão de roteiros com Ollama/Qwen2.5 1.5B opcional: `./scripts/iniciar-roteiro-ia.sh`. O módulo não precisa permanecer em execução enquanto renderiza.
+- Para sugerir roteiros com Ollama/Qwen2.5 1.5B, execute `./scripts/iniciar-roteiro-ia.sh`. Escolha uma duração-alvo de 1 a 5 minutos no editor. A sugestão traz uma estimativa de leitura e pode ser aplicada após confirmação. A duração real depende do ritmo da voz Piper e do texto final.
 
 ### ComfyUI / Wan opcional
 

@@ -52,7 +52,22 @@
           <div class="slide-preview-panel hidden" id="preview-panel"><div class="preview-heading"><h3>Pré-visualização do slide</h3><span id="preview-number"></span></div><img id="slide-preview" alt="Prévia do slide selecionado" loading="lazy"><p>O projeto é salvo antes de atualizar a prévia. Use os blocos e o tema para variar o design.</p></div>
           <div class="links" id="slides-only-links"></div>
         </section>
-        <div class="section-heading"><div><h2>Cenas e narrações</h2><p>Um slide por cena. As legendas seguem as frases sintetizadas.</p></div><div class="rowbuttons"><button id="generate" class="small secondary">✦ Sugerir cenas com IA</button><button id="add" class="small secondary">+ Adicionar cena</button></div></div>
+        <div class="section-heading script-heading">
+          <div><h2>Cenas e narrações</h2><p>Um slide por cena. As legendas seguem as frases sintetizadas.</p></div>
+          <div class="rowbuttons">
+            <label class="script-duration">Duração-alvo da IA
+              <select id="script-duration">
+                <option value="1">1 min</option>
+                <option value="2">2 min</option>
+                <option value="3" selected>3 min</option>
+                <option value="4">4 min</option>
+                <option value="5">5 min</option>
+              </select>
+            </label>
+            <button id="generate" class="small secondary" type="button">✦ Sugerir cenas com IA</button>
+            <button id="add" class="small secondary" type="button">+ Adicionar cena</button>
+          </div>
+        </div>
         <div id="scenes" class="scenes"></div>
         <div class="actions"><button id="save" class="secondary">Salvar projeto</button><button id="render">▶ Gerar videoaula</button></div>
         <div id="status" class="status hidden"></div>

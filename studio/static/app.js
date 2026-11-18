@@ -356,17 +356,33 @@ polling = setInterval(() => {
 }, 2400);
 $('generate').addEventListener('click', async () => {
   if (!selected) return toast('Selecione um projeto.');
-  $('generate').disabled = true;
-  $('generate').textContent = 'IA pensando...';
+  const pid = selected;
+  const load = projectLoad;
+  const button = $('generate');
+  button.disabled = true;
+  button.textContent = 'Preparando roteiro…';
   try {
-    const draft = await request(`/api/projects/${selected}/suggest`, jsonOpt('POST', payload()));
+    const project = payload();
+    const minutes = $('script-duration').value;
+    const draft = await request(`/api/projects/${pid}/suggest?duration_minutes=${minutes}`, jsonOpt('POST', project));
+    if (load !== projectLoad) return;
+    const seconds = draft.estimated_seconds;
+    const estimate = `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+    const short = draft.below_target ? ` A sugestão ficou abaixo dos ${minutes} min solicitados.` : '';
+    const accepted = await askDialog({
+      title: 'Aplicar roteiro sugerido?',
+      description: `${draft.scenes.length} cenas com narração estimada em ${estimate}.${short} Aplicar substitui as cenas no editor. Revise o conteúdo antes de salvar.`,
+      confirmText: 'Aplicar roteiro',
+    });
+    if (!accepted || load !== projectLoad) return;
     renderScenes(draft.scenes);
-    toast('Cenas sugeridas pela IA. Revise os fatos e clique Salvar projeto.');
+    $('preview-panel').classList.add('hidden');
+    toast('Roteiro aplicado. Revise as cenas antes de salvar ou gerar a videoaula.');
   } catch (err) {
-    toast('Falha na IA local: ' + err.message);
+    if (load === projectLoad) toast('Falha na IA local: ' + err.message);
   } finally {
-    $('generate').disabled = false;
-    $('generate').textContent = '✦ Sugerir cenas com IA';
+    button.disabled = false;
+    button.textContent = '✦ Sugerir cenas com IA';
   }
 });
 
